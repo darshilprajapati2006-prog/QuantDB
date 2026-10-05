@@ -10,6 +10,8 @@ Important:
 - Table and column names must match the QuantDB database schema.
 """
 
+from typing import Any, Dict, List, Optional
+
 
 # ============================================================
 # USERS
@@ -847,3 +849,354 @@ SELECT
     SUM(CASE WHEN order_status = 'REJECTED' THEN 1 ELSE 0 END) AS rejected_orders
 FROM orders;
 """
+
+
+# ============================================================
+# QUERY EXECUTION HELPERS (USED BY REPOSITORY LAYER)
+# ============================================================
+
+def get_user_by_id(conn, user_id: int) -> Optional[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_USER_BY_ID, (user_id,))
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+
+
+def get_all_users(conn) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_ALL_USERS)
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def get_security_by_id(conn, security_id: int) -> Optional[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_SECURITY_BY_ID, (security_id,))
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+
+
+def get_all_securities(conn) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_ALL_SECURITIES)
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def get_market_data(
+    conn,
+    security_id: int,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        if start_time is not None and end_time is not None:
+            cursor.execute(
+                GET_MARKET_DATA_BY_SECURITY_DATE_RANGE,
+                (security_id, start_time, end_time),
+            )
+        else:
+            cursor.execute(GET_MARKET_DATA_BY_SECURITY, (security_id,))
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def get_order_by_id(conn, order_id: int) -> Optional[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_ORDER_BY_ID, (order_id,))
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+
+
+def get_orders_by_user(conn, user_id: int) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_ORDERS_BY_USER, (user_id,))
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def get_all_orders(conn) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_ALL_ORDERS)
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def insert_order(
+    conn,
+    user_id: int,
+    security_id: int,
+    order_type: str,
+    side: str,
+    quantity: float,
+    order_price: Optional[float],
+    order_status: str,
+    order_time: str,
+) -> int:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            CREATE_ORDER,
+            (
+                user_id,
+                security_id,
+                order_type,
+                side,
+                quantity,
+                order_price,
+                order_status,
+                order_time,
+            ),
+        )
+        return cursor.lastrowid
+    finally:
+        cursor.close()
+
+
+def update_order_status(conn, order_id: int, order_status: str) -> int:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(UPDATE_ORDER_STATUS, (order_status, order_id))
+        return cursor.rowcount
+    finally:
+        cursor.close()
+
+
+def get_trade_by_id(conn, trade_id: int) -> Optional[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_TRADE_BY_ID, (trade_id,))
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+
+
+def get_trades_by_security(conn, security_id: int) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_TRADES_BY_SECURITY, (security_id,))
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def get_all_trades(conn) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_ALL_TRADES)
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def insert_trade(
+    conn,
+    order_id: int,
+    security_id: int,
+    trade_side: str,
+    quantity: float,
+    execution_price: float,
+    trade_time: str,
+    transaction_cost: float,
+) -> int:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            CREATE_TRADE,
+            (
+                order_id,
+                security_id,
+                trade_side,
+                quantity,
+                execution_price,
+                trade_time,
+                transaction_cost,
+            ),
+        )
+        return cursor.lastrowid
+    finally:
+        cursor.close()
+
+
+def get_portfolio_by_id(conn, portfolio_id: int) -> Optional[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_PORTFOLIO_BY_ID, (portfolio_id,))
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+
+
+def get_portfolios_by_user(conn, user_id: int) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_PORTFOLIOS_BY_USER, (user_id,))
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def get_all_portfolios(conn) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_ALL_PORTFOLIOS)
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def get_position(
+    conn,
+    portfolio_id: int,
+    security_id: int,
+) -> Optional[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            GET_POSITION_BY_PORTFOLIO_SECURITY,
+            (portfolio_id, security_id),
+        )
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+
+
+def get_positions_by_portfolio(
+    conn,
+    portfolio_id: int,
+) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_POSITIONS_BY_PORTFOLIO, (portfolio_id,))
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def get_strategy_by_id(conn, strategy_id: int) -> Optional[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_STRATEGY_BY_ID, (strategy_id,))
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+
+
+def get_strategies_by_user(conn, user_id: int) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_STRATEGIES_BY_USER, (user_id,))
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def get_all_strategies(conn) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_ACTIVE_STRATEGIES)
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def insert_strategy(
+    conn,
+    user_id: int,
+    strategy_name: str,
+    description: Optional[str],
+    strategy_type: str,
+    parameters: Optional[str],
+    status: str,
+    created_at: str,
+) -> int:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            CREATE_STRATEGY,
+            (
+                user_id,
+                strategy_name,
+                description,
+                strategy_type,
+                parameters,
+                status,
+                created_at,
+            ),
+        )
+        return cursor.lastrowid
+    finally:
+        cursor.close()
+
+
+def get_backtest_by_id(conn, backtest_id: int) -> Optional[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_BACKTEST_BY_ID, (backtest_id,))
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+
+
+def get_backtests_by_strategy(
+    conn,
+    strategy_id: int,
+) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_BACKTESTS_BY_STRATEGY, (strategy_id,))
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def get_all_backtests(conn) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_ALL_BACKTESTS)
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def get_backtest_result(conn, backtest_id: int) -> Optional[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_BACKTEST_RESULT, (backtest_id,))
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+
+
+def get_risk_metrics(
+    conn,
+    portfolio_id: Optional[int] = None,
+    backtest_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        if portfolio_id is not None:
+            cursor.execute(GET_RISK_METRICS_BY_PORTFOLIO, (portfolio_id,))
+            return cursor.fetchall()
+        elif backtest_id is not None:
+            cursor.execute(GET_RISK_METRICS_BY_BACKTEST, (backtest_id,))
+            return cursor.fetchall()
+        return []
+    finally:
+        cursor.close()
