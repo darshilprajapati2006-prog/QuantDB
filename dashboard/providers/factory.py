@@ -16,13 +16,15 @@ _real_instance: Union[RealProvider, None] = None
 def get_current_data_mode() -> str:
     """
     Returns the currently active DATA_MODE.
-    Defaults to 'mock' as specified in Phase 1 requirements.
-    Can be overridden via DATA_MODE environment variable or Streamlit session state.
+    Defaults to 'mock' as specified in requirements.
+    Can be overridden via Streamlit session state, environment variable, or Streamlit secrets.
     """
     try:
         import streamlit as st
         if hasattr(st, "session_state") and "DATA_MODE" in st.session_state:
             return st.session_state["DATA_MODE"].lower()
+        if hasattr(st, "secrets") and "DATA_MODE" in st.secrets:
+            return str(st.secrets["DATA_MODE"]).lower()
     except Exception:
         pass
     return os.environ.get("DATA_MODE", "mock").lower()

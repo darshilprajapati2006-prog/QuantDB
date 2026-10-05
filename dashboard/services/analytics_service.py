@@ -48,3 +48,14 @@ def get_portfolio_risk_metrics(portfolio_id: int = 1) -> Dict:
             "var_95_daily": 0.0,
             "cvar_95_daily": 0.0,
         }
+
+
+def get_platform_users() -> list:
+    """Retrieves all registered platform users from the active provider."""
+    try:
+        provider = get_provider()
+        return provider.get_users()
+    except Exception as e:
+        logger.error(f"Error fetching platform users: {e}")
+        return []
+

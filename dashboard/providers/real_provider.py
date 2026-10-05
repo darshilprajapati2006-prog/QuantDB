@@ -112,6 +112,23 @@ class RealProvider:
             logger.error(f"RealProvider.get_securities error: {e}")
             raise
 
+    def get_users(self) -> List[Dict[str, Any]]:
+        """Fetches platform users from MySQL QuantDB via Repository."""
+        if not self.is_connected():
+            raise ConnectionError("MySQL QuantDB is unavailable in REAL mode.")
+        try:
+            records = self.repo.get_users()
+            users: List[Dict[str, Any]] = []
+            for r in records:
+                u = dict(r)
+                if "created_at" in u and u["created_at"] is not None:
+                    u["created_at"] = str(u["created_at"])
+                users.append(u)
+            return users
+        except Exception as e:
+            logger.error(f"RealProvider.get_users error: {e}")
+            raise
+
     def get_exchanges(self) -> List[Dict[str, Any]]:
         """Fetches exchanges from MySQL QuantDB."""
         if not self.is_connected():
@@ -127,6 +144,7 @@ class RealProvider:
         finally:
             cursor.close()
             conn.close()
+
 
     # =========================================================
     # MARKET DATA
@@ -366,8 +384,10 @@ class RealProvider:
 
     def get_portfolio_equity_curve(self, portfolio_id: int, days: int = 180) -> pd.DataFrame:
         """
-        Retrieves or generates historical equity curve for the portfolio.
-        Constructs trajectory based on initial capital, cash, and position values.
+        Retrieves historical equity curve for the portfolio.
+        Reconstructs historical valuation deterministically:
+        Portfolio Equity(t) = Cash + Sum(position_quantity * market_price(security, t))
+        using actual positions and market data rows from MySQL QuantDB.
         """
         if not self.is_connected():
             raise ConnectionError("MySQL QuantDB is unavailable in REAL mode.")
@@ -380,38 +400,84 @@ class RealProvider:
 
         val = port["portfolio_value"]
         init = port["initial_capital"]
+        cash = port["cash"]
 
-        # If historical market data exists, synthesize baseline equity trajectory
+        # Check if the portfolio holds any open positions
+        positions_df = self.get_positions(portfolio_id)
+
+        if not positions_df.empty:
+            # Multi-asset valuation across historical timestamps
+            # Collect unique timestamps across held securities
+            sec_ids = positions_df["security_id"].unique()
+            sec_hist: Dict[int, Dict[Any, float]] = {}
+            all_timestamps = set()
+
+            for s_id in sec_ids:
+                m_rows = self.repo.get_market_data(int(s_id))
+                price_by_ts: Dict[Any, float] = {}
+                for mr in m_rows:
+                    ts = mr["timestamp"]
+                    price_by_ts[ts] = float(mr["close_price"])
+                    all_timestamps.add(ts)
+                sec_hist[int(s_id)] = price_by_ts
+
+            if all_timestamps:
+                sorted_ts = sorted(list(all_timestamps))
+                curve_rows = []
+                max_eq = 0.0
+
+                for i, ts in enumerate(sorted_ts):
+                    holdings_val = 0.0
+                    for _, pos_row in positions_df.iterrows():
+                        s_id = int(pos_row["security_id"])
+                        qty = float(pos_row["quantity"])
+                        # Price at timestamp or fallback to average_price
+                        p_at_t = sec_hist.get(s_id, {}).get(ts, float(pos_row["average_price"]))
+                        holdings_val += qty * p_at_t
+
+                    eq = cash + holdings_val
+                    max_eq = max(max_eq, eq)
+                    dd = ((eq - max_eq) / max_eq * 100.0) if max_eq > 0 else 0.0
+                    daily_ret = 0.0
+                    if i > 0 and curve_rows:
+                        prev_eq = curve_rows[-1]["portfolio_value"]
+                        daily_ret = ((eq - prev_eq) / prev_eq * 100.0) if prev_eq > 0 else 0.0
+
+                    curve_rows.append(
+                        {
+                            "timestamp": pd.to_datetime(ts),
+                            "portfolio_value": round(eq, 2),
+                            "benchmark_value": round(init * (1.0 + 0.0005 * i), 2),
+                            "daily_return": round(daily_ret, 2),
+                            "drawdown_pct": round(dd, 2),
+                        }
+                    )
+                return pd.DataFrame(curve_rows)
+
+        # If no positions are held yet, construct equity using available market data timestamps
+        # to show principal stability over observation timestamps
         mkt_rows = self.repo.get_market_data(1)
         if mkt_rows and len(mkt_rows) >= 2:
-            ts_list = [r["timestamp"] for r in mkt_rows]
-            prices = [float(r["close_price"]) for r in mkt_rows]
-            base_p = prices[0]
             curve_rows = []
-            max_eq = 0.0
-            for i, (ts, pr) in enumerate(zip(ts_list, prices)):
-                eq = init * (pr / base_p)
-                max_eq = max(max_eq, eq)
-                dd = ((eq - max_eq) / max_eq * 100.0) if max_eq > 0 else 0.0
-                daily_ret = ((prices[i] - prices[i - 1]) / prices[i - 1] * 100.0) if i > 0 else 0.0
+            for i, mr in enumerate(mkt_rows):
                 curve_rows.append(
                     {
-                        "timestamp": pd.to_datetime(ts),
-                        "portfolio_value": round(eq, 2),
+                        "timestamp": pd.to_datetime(mr["timestamp"]),
+                        "portfolio_value": round(val, 2),
                         "benchmark_value": round(init * (1.0 + 0.0005 * i), 2),
-                        "daily_return": round(daily_ret, 2),
-                        "drawdown_pct": round(dd, 2),
+                        "daily_return": 0.0,
+                        "drawdown_pct": 0.0,
                     }
                 )
             return pd.DataFrame(curve_rows)
 
-        # Fallback single point
+        # Fallback single point at current timestamp
         return pd.DataFrame(
             [
                 {
                     "timestamp": pd.to_datetime(datetime.now()),
-                    "portfolio_value": val,
-                    "benchmark_value": init,
+                    "portfolio_value": round(val, 2),
+                    "benchmark_value": round(init, 2),
                     "daily_return": 0.0,
                     "drawdown_pct": 0.0,
                 }

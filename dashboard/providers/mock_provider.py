@@ -47,6 +47,14 @@ class MockProvider:
     def get_securities(self) -> List[Dict]:
         return get_securities_list()
 
+    def get_users(self) -> List[Dict]:
+        return [
+            {"user_id": 1, "name": "Darshil Prajapati", "email": "darshil@quantdb.local", "role": "ADMIN", "status": "ACTIVE", "created_at": "2024-01-01 00:00:00"},
+            {"user_id": 2, "name": "Bharat", "email": "bharat@quantdb.local", "role": "QUANT_RESEARCHER", "status": "ACTIVE", "created_at": "2024-01-05 10:15:00"},
+            {"user_id": 3, "name": "Sriteja", "email": "sriteja@quantdb.local", "role": "ADMIN", "status": "ACTIVE", "created_at": "2024-01-10 11:30:00"},
+            {"user_id": 4, "name": "Simulated Trader 1", "email": "trader1@quantdb.local", "role": "SIMULATED_TRADER", "status": "ACTIVE", "created_at": "2024-02-01 09:00:00"},
+        ]
+
     def get_exchanges(self) -> List[Dict]:
         return get_exchanges_list()
 

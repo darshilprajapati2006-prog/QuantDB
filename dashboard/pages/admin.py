@@ -22,7 +22,7 @@ from dashboard.components.sidebar import render_sidebar
 from dashboard.components.status import render_simulation_banner
 from dashboard.components.metrics import render_metric_card
 from dashboard.components.tables import render_dataframe
-from dashboard.services.analytics_service import get_system_health
+from dashboard.services.analytics_service import get_system_health, get_platform_users
 from dashboard.services.market_service import get_available_securities, get_available_exchanges
 from dashboard.providers.factory import get_current_data_mode, set_data_mode
 
@@ -83,7 +83,7 @@ with adm_c2:
     render_metric_card(
         title="BACKEND SERVICES",
         value="ONLINE (MOCK)" if curr_mode == "MOCK" else ("CONNECTED" if backend_ok else "OFFLINE"),
-        change="FastAPI / Python Service Layer",
+        change="Python Service & Quant Layer",
         is_positive=backend_ok,
         description="Repository & Trading Services"
     )
@@ -168,16 +168,18 @@ with admin_tab1:
         </div>
     """, unsafe_allow_html=True)
 
-    # Mock user directory matching schema: user_id, name, email, role, status, created_at
-    mock_users = pd.DataFrame([
-        {"user_id": 1, "name": "Darshil Prajapati", "email": "darshil@quantdb.local", "role": "ADMIN", "status": "ACTIVE", "created_at": "2024-01-01 00:00:00"},
-        {"user_id": 2, "name": "Bharat", "email": "bharat@quantdb.local", "role": "QUANT_RESEARCHER", "status": "ACTIVE", "created_at": "2024-01-05 10:15:00"},
-        {"user_id": 3, "name": "Sriteja", "email": "sriteja@quantdb.local", "role": "ADMIN", "status": "ACTIVE", "created_at": "2024-01-10 11:30:00"},
-        {"user_id": 4, "name": "Simulated Trader 1", "email": "trader1@quantdb.local", "role": "SIMULATED_TRADER", "status": "ACTIVE", "created_at": "2024-02-01 09:00:00"},
-    ])
+    # Retrieve platform users via active provider (MySQL QuantDB in REAL mode, mock in MOCK mode)
+    users_list = get_platform_users()
+    if users_list:
+        users_df = pd.DataFrame(users_list)
+        # Ensure display columns match schema
+        display_cols = [c for c in ["user_id", "name", "email", "role", "status", "created_at"] if c in users_df.columns]
+        users_df = users_df[display_cols]
+    else:
+        users_df = pd.DataFrame(columns=["user_id", "name", "email", "role", "status", "created_at"])
 
     render_dataframe(
-        mock_users,
+        users_df,
         column_config={
             "user_id": st.column_config.NumberColumn("User ID", format="#%d"),
             "name": st.column_config.TextColumn("Full Name"),
