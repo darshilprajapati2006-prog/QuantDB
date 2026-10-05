@@ -127,7 +127,7 @@ with m_col1:
         value=format_currency(latest_row["close_price"]),
         change=f"{price_change:+.2f} ({price_change_pct:+.2f}%)",
         is_positive=price_change >= 0,
-        description=f"Close as of {latest_row['timestamp'][:10]}"
+        description=f"Close as of {latest_row['timestamp'].strftime('%Y-%m-%d')}"
     )
 
 with m_col2:
