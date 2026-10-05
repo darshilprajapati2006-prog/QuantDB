@@ -245,8 +245,6 @@ with r2_c1:
         is_positive=None,
         description="Executed Round-Trips"
     )
-with r2_c1:
-    pass
 with r2_c2:
     render_metric_card(
         title="WIN RATE",

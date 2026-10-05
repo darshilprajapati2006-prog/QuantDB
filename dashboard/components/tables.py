@@ -164,7 +164,7 @@ def render_backtest_results_table(df: pd.DataFrame):
         "result": st.column_config.TextColumn("Outcome"),
     }
 
-    active_configs = {k: v for k, v in col_config.items() if k in display_df.columns} if 'display_df' in locals() else {k: v for k, v in col_config.items() if k in df.columns}
+    active_configs = {k: v for k, v in col_config.items() if k in df.columns}
 
     st.dataframe(
         df,

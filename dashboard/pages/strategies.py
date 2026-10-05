@@ -235,6 +235,9 @@ with param_col:
                 try:
                     st.switch_page("pages/backtesting.py")
                 except Exception:
-                    pass
+                    try:
+                        st.switch_page("dashboard/pages/backtesting.py")
+                    except Exception:
+                        pass
 
             st.markdown("</div>", unsafe_allow_html=True)

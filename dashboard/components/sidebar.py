@@ -82,8 +82,10 @@ def render_sidebar(current_page: str = "Overview") -> str:
                 try:
                     st.switch_page(target_route)
                 except Exception:
-                    # In case execution is in a context where switch_page isn't active
-                    pass
+                    try:
+                        st.switch_page(f"dashboard/{target_route}")
+                    except Exception:
+                        pass
 
         # Data Mode Switcher (Research/Development Utility)
         st.markdown("<div class='quant-divider'></div>", unsafe_allow_html=True)
