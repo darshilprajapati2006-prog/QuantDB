@@ -139,7 +139,10 @@ with st.container():
 
     with mode_c2:
         if curr_mode == "REAL":
-            st.warning("REAL DATA MODE active: Waiting for backend services connection from `src.database`. Ensure MySQL is running on port 3306.")
+            if health.get("connected", False):
+                st.success("REAL DATA MODE active: Successfully connected to MySQL QuantDB and Python backend services.")
+            else:
+                st.warning("REAL DATA MODE active: Database connection unreachable. Ensure MySQL is running on port 3306.")
         else:
             st.info("MOCK DATA MODE active: Platform is operating autonomously with high-fidelity financial data.")
 

@@ -31,18 +31,18 @@ Inspired by institutional quantitative research terminals, QuantDB delivers high
           |                         |
           v                         v
     Mock Provider             Real Provider
-(Autonomous Simulation)  (Integration Bridge to src/)
+(Autonomous Simulation)  (Finalized Backend Bridge)
                                     |
                        +------------+------------+
                        |                         |
                        v                         v
                 Backend Services          Quant Services
-                 (src/database)          (src/analytics,
-                 (src/trading)            src/backtesting)
+                 (src/services)           (src/analytics,
+                 (src/database)            src/backtesting)
                        |                         |
                        v                         v
                      MySQL                Analytics Engine
-                                                 |
+                    QuantDB                      |
                                                  v
                                            Backtesting
                                                  |
@@ -107,7 +107,7 @@ dashboard/
 ### Prerequisites
 Install core dependencies:
 ```bash
-pip install streamlit pandas plotly
+pip install streamlit pandas plotly mysql-connector-python
 ```
 
 ### Launch Dashboard
@@ -121,6 +121,11 @@ Open `http://localhost:8501` in your browser.
 Verify all service interfaces, data contracts, and fault tolerance:
 ```bash
 python dashboard/test_suite.py
+```
+
+To run the complete backend, quant, and service tests:
+```bash
+pytest tests/ -v
 ```
 
 ---
@@ -141,24 +146,29 @@ The dashboard is designed so that UI pages **never** change when switching from 
    export DATA_MODE=real
    ```
 
-### Real Provider Integration Guide for Team Members
+### Real Provider Integration
 
-When Bharat (Database) and Darshil (Backend/Quant) connect their services:
-The `dashboard/providers/real_provider.py` connects to the following Python services in `src/`:
+The `dashboard/providers/real_provider.py` connects to the finalized backend services in `src/services/` and repository in `src/database/`:
 
 1. **Market Data & Securities**:
-   - `src.trading.securities.get_all_securities() -> List[Dict]`
-   - `src.database.repository.MarketDataRepository.get_historical_ohlcv(security_id, start_date, end_date) -> pd.DataFrame`
+   - `src.database.repository.repository.get_securities() -> List[Dict]`
+   - `src.services.market_service.get_market_data(security_id, start_date, end_date) -> pd.DataFrame`
 2. **Orders & Trading**:
-   - `src.trading.order_service.place_order(portfolio_id, security_id, symbol, side, order_type, quantity, price) -> Dict`
-   - `src.trading.order_service.get_orders(portfolio_id, status) -> pd.DataFrame`
-   - `src.trading.trade_service.get_trades(portfolio_id) -> pd.DataFrame`
+   - `src.services.trading_service.create_order(user_id, security_id, side, order_type, quantity, order_price) -> Order`
+   - `src.services.trading_service.execute_order(order, execution_price) -> Trade`
+   - `src.services.trading_service.get_orders() -> List[Dict]`
+   - `src.services.trading_service.get_trades() -> List[Dict]`
 3. **Portfolios & Positions**:
-   - `src.trading.portfolio_service.get_portfolio_summary(portfolio_id) -> Dict`
-   - `src.trading.portfolio_service.get_positions(portfolio_id) -> pd.DataFrame`
+   - `src.services.portfolio_service.get_portfolio_summary(portfolio_id) -> Dict`
+   - `src.services.portfolio_service.get_positions(portfolio_id) -> List[Dict]`
+   - `src.services.portfolio_service.update_position(portfolio_id, security_id, quantity, price, side) -> Dict`
 4. **Quant Engine & Backtesting**:
-   - `src.backtesting.engine.BacktestEngine.run(strategy_id, security_id, start_date, end_date, initial_capital, transaction_cost_pct, parameters) -> Dict`
-5. **Risk Metrics**:
-   - `src.analytics.risk.compute_risk_metrics(portfolio_id) -> Dict`
+   - `src.services.backtest_service.run_backtest(strategy, security, historical_data, initial_capital, transaction_cost, strategy_parameters) -> Dict`
+   - `src.backtesting.engine.BacktestEngine`
+5. **Risk Metrics & Analytics**:
+   - `src.services.analytics_service.calculate_returns(prices) -> pd.Series`
+   - `src.services.analytics_service.calculate_risk_metrics(returns) -> Dict`
+   - `src.services.analytics_service.calculate_performance(trades, returns, equity) -> Dict`
+   - `src.services.analytics_service.calculate_microstructure(bid_price, ask_price) -> Dict`
 
 If the database or backend is temporarily unreachable when `DATA_MODE=real` is selected, `RealProvider` gracefully handles exceptions and displays clean warning states without crashing the UI.
