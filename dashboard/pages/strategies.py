@@ -19,6 +19,7 @@ from dashboard.components.theme import apply_terminal_theme
 from dashboard.components.sidebar import render_sidebar
 from dashboard.components.status import render_simulation_banner
 from dashboard.components.metrics import render_metric_card
+from dashboard.components.tables import render_dataframe
 from dashboard.services.strategy_service import (
     get_strategies,
     get_strategy_by_id,
@@ -146,7 +147,7 @@ with strat_col:
         </div>
     """, unsafe_allow_html=True)
     df_strats = get_strategies_dataframe()
-    st.dataframe(
+    render_dataframe(
         df_strats,
         column_config={
             "strategy_id": st.column_config.NumberColumn("ID", format="#%d", width="small"),
@@ -155,7 +156,6 @@ with strat_col:
             "status": st.column_config.TextColumn("Status", width="small"),
             "parameter_count": st.column_config.NumberColumn("Params", format="%d"),
         },
-        use_container_width=True,
         hide_index=True,
     )
 

@@ -9,6 +9,14 @@ import pandas as pd
 import streamlit as st
 
 
+def render_dataframe(df: pd.DataFrame, **kwargs):
+    """Renders DataFrame with modern width='stretch' and fallback to use_container_width=True."""
+    try:
+        st.dataframe(df, width="stretch", **kwargs)
+    except TypeError:
+        st.dataframe(df, use_container_width=True, **kwargs)
+
+
 def render_market_data_table(df: pd.DataFrame, max_rows: int = 50):
     """
     Renders formatted historical OHLCV & microstructure table:
@@ -40,10 +48,9 @@ def render_market_data_table(df: pd.DataFrame, max_rows: int = 50):
     # Only include existing columns
     active_configs = {k: v for k, v in col_config.items() if k in display_df.columns}
 
-    st.dataframe(
+    render_dataframe(
         display_df,
         column_config=active_configs,
-        use_container_width=True,
         hide_index=True,
     )
 
@@ -72,10 +79,9 @@ def render_orders_table(df: pd.DataFrame, max_rows: int = 100):
 
     active_configs = {k: v for k, v in col_config.items() if k in display_df.columns}
 
-    st.dataframe(
+    render_dataframe(
         display_df,
         column_config=active_configs,
-        use_container_width=True,
         hide_index=True,
     )
 
@@ -104,10 +110,9 @@ def render_trades_table(df: pd.DataFrame, max_rows: int = 100):
 
     active_configs = {k: v for k, v in col_config.items() if k in display_df.columns}
 
-    st.dataframe(
+    render_dataframe(
         display_df,
         column_config=active_configs,
-        use_container_width=True,
         hide_index=True,
     )
 
@@ -136,10 +141,9 @@ def render_positions_table(df: pd.DataFrame):
 
     active_configs = {k: v for k, v in col_config.items() if k in display_df.columns}
 
-    st.dataframe(
+    render_dataframe(
         display_df,
         column_config=active_configs,
-        use_container_width=True,
         hide_index=True,
     )
 
@@ -166,9 +170,8 @@ def render_backtest_results_table(df: pd.DataFrame):
 
     active_configs = {k: v for k, v in col_config.items() if k in df.columns}
 
-    st.dataframe(
+    render_dataframe(
         df,
         column_config=active_configs,
-        use_container_width=True,
         hide_index=True,
     )

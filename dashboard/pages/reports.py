@@ -26,6 +26,7 @@ from dashboard.components.charts import (
     render_return_distribution,
     render_portfolio_allocation,
 )
+from dashboard.components.tables import render_dataframe
 from dashboard.services.portfolio_service import (
     get_all_portfolios,
     get_portfolio_summary,
@@ -172,7 +173,7 @@ with sec2:
     """, unsafe_allow_html=True)
 
     df_strats = get_strategies_dataframe()
-    st.dataframe(
+    render_dataframe(
         df_strats,
         column_config={
             "strategy_id": st.column_config.NumberColumn("Strategy ID", format="#%d"),
@@ -182,7 +183,6 @@ with sec2:
             "status": st.column_config.TextColumn("Deployment Status"),
             "parameter_count": st.column_config.NumberColumn("Parameters", format="%d"),
         },
-        use_container_width=True,
         hide_index=True,
     )
 
@@ -306,7 +306,7 @@ with sec5:
     """, unsafe_allow_html=True)
 
     if not mkt_df.empty:
-        st.dataframe(
+        render_dataframe(
             mkt_df,
             column_config={
                 "symbol": st.column_config.TextColumn("Symbol", width="small"),
@@ -319,7 +319,6 @@ with sec5:
                 "ask": st.column_config.NumberColumn("Best Ask", format="$%.2f"),
                 "spread": st.column_config.NumberColumn("Spread ($)", format="$%.4f"),
             },
-            use_container_width=True,
             hide_index=True,
         )
     else:

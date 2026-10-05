@@ -70,6 +70,14 @@ def _apply_terminal_layout(fig: go.Figure, title: Optional[str] = None, height: 
     return fig
 
 
+def _render_chart(fig: go.Figure):
+    """Renders Plotly chart with modern width='stretch' and fallback to use_container_width."""
+    try:
+        st.plotly_chart(fig, width="stretch")
+    except TypeError:
+        st.plotly_chart(fig, use_container_width=True)
+
+
 def render_candlestick_chart(df: pd.DataFrame, symbol: str = "TICKER", height: int = 440):
     """
     Renders a 2-row subplot with Candlestick price on top and Volume bars below.
@@ -148,7 +156,7 @@ def render_candlestick_chart(df: pd.DataFrame, symbol: str = "TICKER", height: i
     fig.update_xaxes(rangeslider_visible=False)
     fig.update_yaxes(side="right", tickfont=dict(family=FONT_FAMILY, size=10, color=TEXT_COLOR))
     _apply_terminal_layout(fig, title=f"{symbol} — CANDLESTICK & VOLUME", height=height)
-    st.plotly_chart(fig, use_container_width=True)
+    _render_chart(fig)
 
 
 def render_volume_chart(df: pd.DataFrame, height: int = 220):
@@ -167,7 +175,7 @@ def render_volume_chart(df: pd.DataFrame, height: int = 220):
         )
     )
     _apply_terminal_layout(fig, title="TRADING VOLUME", height=height)
-    st.plotly_chart(fig, use_container_width=True)
+    _render_chart(fig)
 
 
 def render_equity_curve(df: pd.DataFrame, title: str = "PORTFOLIO EQUITY CURVE", include_benchmark: bool = True, height: int = 380):
@@ -204,7 +212,7 @@ def render_equity_curve(df: pd.DataFrame, title: str = "PORTFOLIO EQUITY CURVE",
         )
 
     _apply_terminal_layout(fig, title=title, height=height)
-    st.plotly_chart(fig, use_container_width=True)
+    _render_chart(fig)
 
 
 def render_drawdown_chart(df: pd.DataFrame, title: str = "HISTORICAL DRAWDOWN (%)", height: int = 240):
@@ -229,7 +237,7 @@ def render_drawdown_chart(df: pd.DataFrame, title: str = "HISTORICAL DRAWDOWN (%
     )
     _apply_terminal_layout(fig, title=title, height=height)
     fig.update_yaxes(ticksuffix="%")
-    st.plotly_chart(fig, use_container_width=True)
+    _render_chart(fig)
 
 
 def render_returns_chart(df: pd.DataFrame, title: str = "DAILY RETURNS (%)", height: int = 250):
@@ -251,7 +259,7 @@ def render_returns_chart(df: pd.DataFrame, title: str = "DAILY RETURNS (%)", hei
     )
     _apply_terminal_layout(fig, title=title, height=height)
     fig.update_yaxes(ticksuffix="%")
-    st.plotly_chart(fig, use_container_width=True)
+    _render_chart(fig)
 
 
 def render_portfolio_allocation(positions_df: pd.DataFrame, title: str = "PORTFOLIO ALLOCATION", height: int = 340):
@@ -276,7 +284,7 @@ def render_portfolio_allocation(positions_df: pd.DataFrame, title: str = "PORTFO
     )
     _apply_terminal_layout(fig, title=title, height=height)
     fig.update_layout(showlegend=True)
-    st.plotly_chart(fig, use_container_width=True)
+    _render_chart(fig)
 
 
 def render_pnl_chart(positions_df: pd.DataFrame, title: str = "UNREALIZED P&L BY SECURITY", height: int = 320):
@@ -301,7 +309,7 @@ def render_pnl_chart(positions_df: pd.DataFrame, title: str = "UNREALIZED P&L BY
         )
     )
     _apply_terminal_layout(fig, title=title, height=height)
-    st.plotly_chart(fig, use_container_width=True)
+    _render_chart(fig)
 
 
 def render_return_distribution(returns_series: pd.Series, title: str = "RETURN DISTRIBUTION (HISTOGRAM)", height: int = 280):
@@ -323,7 +331,7 @@ def render_return_distribution(returns_series: pd.Series, title: str = "RETURN D
     )
     _apply_terminal_layout(fig, title=title, height=height)
     fig.update_xaxes(ticksuffix="%", title_text="Return %")
-    st.plotly_chart(fig, use_container_width=True)
+    _render_chart(fig)
 
 
 def render_backtest_signals_chart(equity_df: pd.DataFrame, signals_df: pd.DataFrame, title: str = "STRATEGY EQUITY & SIGNALS", height: int = 380):
@@ -355,4 +363,4 @@ def render_backtest_signals_chart(equity_df: pd.DataFrame, signals_df: pd.DataFr
         )
 
     _apply_terminal_layout(fig, title=title, height=height)
-    st.plotly_chart(fig, use_container_width=True)
+    _render_chart(fig)

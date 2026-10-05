@@ -21,6 +21,7 @@ from dashboard.components.theme import apply_terminal_theme
 from dashboard.components.sidebar import render_sidebar
 from dashboard.components.status import render_simulation_banner
 from dashboard.components.metrics import render_metric_card
+from dashboard.components.tables import render_dataframe
 from dashboard.services.analytics_service import get_system_health
 from dashboard.services.market_service import get_available_securities, get_available_exchanges
 from dashboard.providers.factory import get_current_data_mode, set_data_mode
@@ -172,7 +173,7 @@ with admin_tab1:
         {"user_id": 4, "name": "Simulated Trader 1", "email": "trader1@quantdb.local", "role": "SIMULATED_TRADER", "status": "ACTIVE", "created_at": "2024-02-01 09:00:00"},
     ])
 
-    st.dataframe(
+    render_dataframe(
         mock_users,
         column_config={
             "user_id": st.column_config.NumberColumn("User ID", format="#%d"),
@@ -182,7 +183,6 @@ with admin_tab1:
             "status": st.column_config.TextColumn("Account Status"),
             "created_at": st.column_config.TextColumn("Created Timestamp"),
         },
-        use_container_width=True,
         hide_index=True,
     )
 
@@ -198,7 +198,7 @@ with admin_tab2:
         {"Role": "QUANT_RESEARCHER", "Market Data": "Full Read", "Trading": "Read / Simulated", "Backtesting": "Full Access", "Portfolio": "Assigned Only", "Admin Console": "View Only"},
         {"Role": "SIMULATED_TRADER", "Market Data": "Read Quotes", "Trading": "Order Entry", "Backtesting": "Restricted", "Portfolio": "Own Portfolio", "Admin Console": "No Access"},
     ])
-    st.dataframe(rbac_df, use_container_width=True, hide_index=True)
+    render_dataframe(rbac_df, hide_index=True)
 
 with admin_tab3:
     st.markdown("""
@@ -209,7 +209,7 @@ with admin_tab3:
 
     exchanges = get_available_exchanges()
     df_exch = pd.DataFrame(exchanges)
-    st.dataframe(
+    render_dataframe(
         df_exch,
         column_config={
             "exchange_id": st.column_config.NumberColumn("ID", format="#%d"),
@@ -218,7 +218,6 @@ with admin_tab3:
             "country": st.column_config.TextColumn("Country"),
             "timezone": st.column_config.TextColumn("Timezone"),
         },
-        use_container_width=True,
         hide_index=True,
     )
 
@@ -231,7 +230,7 @@ with admin_tab4:
 
     securities = get_available_securities()
     df_sec = pd.DataFrame(securities)
-    st.dataframe(
+    render_dataframe(
         df_sec,
         column_config={
             "security_id": st.column_config.NumberColumn("ID", format="#%d"),
@@ -242,7 +241,6 @@ with admin_tab4:
             "base_price": st.column_config.NumberColumn("Base Reference Price", format="$%.2f"),
             "volatility": st.column_config.NumberColumn("Annual Volatility", format="%.3f"),
         },
-        use_container_width=True,
         hide_index=True,
     )
 
