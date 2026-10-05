@@ -154,23 +154,20 @@ with st.container():
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-# Check if there is an active backtest run in session; if not, initialize a default baseline
-if "active_backtest" not in st.session_state:
-    _, _, init_payload = execute_backtest(
-        strategy_id=selected_strategy_id,
-        security_id=selected_sec["security_id"],
-        symbol=selected_sec["symbol"],
-        start_date=datetime.combine(start_date, datetime.min.time()),
-        end_date=datetime.combine(end_date, datetime.max.time()),
-        initial_capital=float(initial_capital),
-        transaction_cost_pct=float(transaction_cost),
-        parameters=params_dict,
-    )
-    st.session_state["active_backtest"] = init_payload
-
 bt_data = st.session_state.get("active_backtest")
 if not bt_data:
-    st.info("Configure your simulation parameters above and click 'Run Quantitative Backtest'.")
+    st.markdown("""
+        <div class="quant-card" style="text-align: center; padding: 36px 20px; margin-top: 16px;">
+            <div style="font-size: 2rem; margin-bottom: 8px;">⚡</div>
+            <div style="font-size: 1.1rem; font-weight: 700; color: #F8FAFC; margin-bottom: 6px;">
+                Ready for Quantitative Backtest Execution
+            </div>
+            <div style="font-size: 0.85rem; color: #94A3B8; max-width: 600px; margin: 0 auto 16px auto;">
+                Select your target security instrument, backtest date window, and model parameters above,
+                then click <b style="color: #06B6D4;">RUN QUANTITATIVE BACKTEST</b> to simulate order matching and evaluate risk-adjusted metrics.
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
     st.stop()
 
 summary = bt_data["summary"]

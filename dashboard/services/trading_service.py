@@ -8,22 +8,34 @@ NO REAL-MONEY TRADING IS PERFORMED.
 import logging
 from typing import Dict, Optional, Tuple
 import pandas as pd
-from dashboard.providers.factory import get_provider
+import streamlit as st
+
+from dashboard.providers.factory import get_provider, get_current_data_mode
+from dashboard.services.portfolio_service import clear_portfolio_service_cache
 
 logger = logging.getLogger(__name__)
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def _cached_get_orders(data_mode: str, portfolio_id: Optional[int], status: Optional[str]) -> pd.DataFrame:
+    provider = get_provider()
+    return provider.get_orders(portfolio_id=portfolio_id, status=status)
 
 
 def get_orders(portfolio_id: Optional[int] = None, status: Optional[str] = None) -> pd.DataFrame:
     """Retrieves orders filtered by portfolio and/or status."""
     try:
-        provider = get_provider()
-        return provider.get_orders(portfolio_id=portfolio_id, status=status)
+        mode = get_current_data_mode()
+        return _cached_get_orders(mode, portfolio_id, status)
     except Exception as e:
         logger.error(f"Error fetching orders: {e}")
-        return pd.DataFrame(columns=[
-            "order_id", "portfolio_id", "security_id", "symbol",
-            "timestamp", "side", "order_type", "quantity", "price", "status"
-        ])
+        try:
+            return get_provider().get_orders(portfolio_id=portfolio_id, status=status)
+        except Exception:
+            return pd.DataFrame(columns=[
+                "order_id", "portfolio_id", "security_id", "symbol",
+                "timestamp", "side", "order_type", "quantity", "price", "status"
+            ])
 
 
 def get_open_orders(portfolio_id: Optional[int] = None) -> pd.DataFrame:
@@ -31,17 +43,36 @@ def get_open_orders(portfolio_id: Optional[int] = None) -> pd.DataFrame:
     return get_orders(portfolio_id=portfolio_id, status="PENDING")
 
 
+@st.cache_data(ttl=15, show_spinner=False)
+def _cached_get_trades(data_mode: str, portfolio_id: Optional[int]) -> pd.DataFrame:
+    provider = get_provider()
+    return provider.get_trades(portfolio_id=portfolio_id)
+
+
 def get_trades(portfolio_id: Optional[int] = None) -> pd.DataFrame:
     """Retrieves executed trade history."""
     try:
-        provider = get_provider()
-        return provider.get_trades(portfolio_id=portfolio_id)
+        mode = get_current_data_mode()
+        return _cached_get_trades(mode, portfolio_id)
     except Exception as e:
         logger.error(f"Error fetching trades: {e}")
-        return pd.DataFrame(columns=[
-            "trade_id", "order_id", "security_id", "symbol",
-            "timestamp", "side", "quantity", "execution_price", "pnl", "transaction_cost"
-        ])
+        try:
+            return get_provider().get_trades(portfolio_id=portfolio_id)
+        except Exception:
+            return pd.DataFrame(columns=[
+                "trade_id", "order_id", "security_id", "symbol",
+                "timestamp", "side", "quantity", "execution_price", "pnl", "transaction_cost"
+            ])
+
+
+def invalidate_trading_cache() -> None:
+    """Invalidates affected caches after state-mutating operations like order placement."""
+    try:
+        _cached_get_orders.clear()
+        _cached_get_trades.clear()
+        clear_portfolio_service_cache()
+    except Exception as e:
+        logger.debug(f"Failed to invalidate trading cache: {e}")
 
 
 def submit_simulated_order(
@@ -99,7 +130,12 @@ def submit_simulated_order(
         )
         if "error" in order:
             return False, order["error"], None
+
+        # State has changed: immediately invalidate affected caches
+        invalidate_trading_cache()
+
         return True, f"Simulated {order_type} {side_clean} order for {qty} {symbol} placed successfully (Order #{order['order_id']}).", order
     except Exception as e:
         logger.error(f"Order submission error: {e}")
         return False, f"Order submission failed: {str(e)}", None
+

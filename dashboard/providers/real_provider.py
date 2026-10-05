@@ -51,10 +51,15 @@ class RealProvider:
         self.mode_name = "REAL"
         self.repo = repo if repo is not None else default_repository
         self._connected = False
+        self._last_check_time: Optional[datetime] = None
         self._check_connection()
 
     def _check_connection(self) -> None:
-        """Checks whether database / backend services are reachable."""
+        """Checks whether database / backend services are reachable with short TTL throttling."""
+        now = datetime.now()
+        if self._last_check_time and (now - self._last_check_time).total_seconds() < 10.0:
+            return
+
         try:
             conn = get_connection()
             if conn is not None and conn.is_connected():
@@ -65,6 +70,8 @@ class RealProvider:
         except Exception as e:
             logger.warning(f"RealProvider database connection check failed: {e}")
             self._connected = False
+        finally:
+            self._last_check_time = now
 
     def is_connected(self) -> bool:
         """Validates live connectivity to MySQL QuantDB."""
@@ -76,28 +83,43 @@ class RealProvider:
     # =========================================================
 
     def get_securities(self) -> List[Dict[str, Any]]:
-        """Fetches active securities from MySQL QuantDB via Repository."""
+        """Fetches active securities from MySQL QuantDB via Repository with batched pricing."""
         if not self.is_connected():
-            raise ConnectionError("MySQL QuantDB is unavailable in REAL mode.")
+            raise ConnectionError("REAL DATABASE TEMPORARILY UNAVAILABLE. Please try again in a moment or switch to MOCK mode.")
         try:
             records = self.repo.get_securities()
-            # If records returned, ensure base_price & volatility estimates exist for UI
+            if not records:
+                return []
+
+            # Batch fetch latest close prices for all securities in 1 single query
+            latest_prices: Dict[int, float] = {}
+            conn = get_connection()
+            if conn:
+                try:
+                    cursor = conn.cursor(dictionary=True)
+                    cursor.execute("""
+                        SELECT m.security_id, m.close_price
+                        FROM market_data m
+                        JOIN (
+                            SELECT security_id, MAX(timestamp) AS max_ts
+                            FROM market_data
+                            GROUP BY security_id
+                        ) latest ON m.security_id = latest.security_id AND m.timestamp = latest.max_ts;
+                    """)
+                    for r in cursor.fetchall():
+                        latest_prices[int(r["security_id"])] = float(r["close_price"])
+                except Exception as e:
+                    logger.debug(f"Batch fetch latest prices failed ({e}); will default base prices.")
+                finally:
+                    cursor.close()
+                    conn.close()
+
             enriched: List[Dict[str, Any]] = []
             for r in records:
-                sec_id = r["security_id"]
+                sec_id = int(r["security_id"])
                 sec_dict = dict(r)
-                # Ensure base_price / volatility keys exist for UI compatibility
                 if "base_price" not in sec_dict or sec_dict["base_price"] is None:
-                    # Look up latest market data close price if available
-                    try:
-                        mkt_rows = self.repo.get_market_data(sec_id)
-                        if mkt_rows:
-                            latest_close = float(mkt_rows[-1].get("close_price", 100.0))
-                            sec_dict["base_price"] = latest_close
-                        else:
-                            sec_dict["base_price"] = 100.0
-                    except Exception:
-                        sec_dict["base_price"] = 100.0
+                    sec_dict["base_price"] = latest_prices.get(sec_id, 100.0)
                 else:
                     sec_dict["base_price"] = float(sec_dict["base_price"])
 
@@ -249,15 +271,46 @@ class RealProvider:
         else:
             df["spread"] = 0.0
 
-        # Compute price change compared to previous row for each security
+        # Compute price change compared to previous row for each security using batched query
+        prev_prices: Dict[int, float] = {}
+        conn = get_connection()
+        if conn:
+            try:
+                cursor = conn.cursor(dictionary=True)
+                try:
+                    cursor.execute("""
+                        SELECT security_id, close_price
+                        FROM (
+                            SELECT security_id, close_price,
+                                   ROW_NUMBER() OVER (PARTITION BY security_id ORDER BY timestamp DESC) AS rn
+                            FROM market_data
+                        ) sub
+                        WHERE rn = 2;
+                    """)
+                    for r in cursor.fetchall():
+                        prev_prices[int(r["security_id"])] = float(r["close_price"])
+                except Exception:
+                    # Fallback for systems without window function support
+                    for sec_id in df["security_id"].unique():
+                        cursor.execute("""
+                            SELECT close_price FROM market_data
+                            WHERE security_id = %s
+                            ORDER BY timestamp DESC LIMIT 1 OFFSET 1;
+                        """, (int(sec_id),))
+                        p_row = cursor.fetchone()
+                        if p_row:
+                            prev_prices[int(sec_id)] = float(p_row["close_price"])
+            finally:
+                cursor.close()
+                conn.close()
+
         changes = []
         change_pcts = []
         for _, row in df.iterrows():
             sec_id = int(row["security_id"])
-            all_mkt = self.repo.get_market_data(sec_id)
-            if len(all_mkt) >= 2:
-                prev_c = float(all_mkt[-2]["close_price"])
-                curr_c = float(row["last_price"])
+            curr_c = float(row["last_price"])
+            if sec_id in prev_prices:
+                prev_c = prev_prices[sec_id]
                 diff = round(curr_c - prev_c, 2)
                 diff_pct = round((diff / prev_c) * 100.0, 2) if prev_c > 0 else 0.0
             else:
@@ -328,7 +381,7 @@ class RealProvider:
         }
 
     def get_positions(self, portfolio_id: int) -> pd.DataFrame:
-        """Retrieves active positions from MySQL QuantDB."""
+        """Retrieves active positions from MySQL QuantDB with batch pricing."""
         if not self.is_connected():
             raise ConnectionError("MySQL QuantDB is unavailable in REAL mode.")
 
@@ -348,15 +401,40 @@ class RealProvider:
                 ]
             )
 
+        # Batch fetch latest mark prices for all open positions in 1 query
+        sec_ids = [int(p["security_id"]) for p in pos_records if "security_id" in p]
+        latest_prices: Dict[int, float] = {}
+        if sec_ids:
+            conn = get_connection()
+            if conn:
+                try:
+                    cursor = conn.cursor(dictionary=True)
+                    fmt_ids = ",".join(str(s) for s in sec_ids)
+                    cursor.execute(f"""
+                        SELECT m.security_id, m.close_price
+                        FROM market_data m
+                        JOIN (
+                            SELECT security_id, MAX(timestamp) AS max_ts
+                            FROM market_data
+                            WHERE security_id IN ({fmt_ids})
+                            GROUP BY security_id
+                        ) latest ON m.security_id = latest.security_id AND m.timestamp = latest.max_ts;
+                    """)
+                    for r in cursor.fetchall():
+                        latest_prices[int(r["security_id"])] = float(r["close_price"])
+                except Exception as e:
+                    logger.debug(f"Batch fetch position prices failed ({e}); falling back to avg_price.")
+                finally:
+                    cursor.close()
+                    conn.close()
+
         rows = []
         total_val = 0.0
         for p in pos_records:
-            sec_id = p["security_id"]
+            sec_id = int(p["security_id"])
             qty = float(p.get("quantity", 0.0))
             avg_p = float(p.get("average_price", 0.0))
-            # Get latest current mark price from market data
-            mkt_rows = self.repo.get_market_data(sec_id)
-            cur_p = float(mkt_rows[-1]["close_price"]) if mkt_rows else avg_p
+            cur_p = latest_prices.get(sec_id, avg_p)
 
             mkt_val = qty * cur_p
             total_val += mkt_val
@@ -780,9 +858,13 @@ class RealProvider:
             params = {"window": win, "threshold": thresh}
 
         try:
-            # 1. Fetch real historical data from MySQL
+            # 1. Fetch real historical data from MySQL filtered by date range
+            str_start = start_date.strftime("%Y-%m-%d %H:%M:%S") if start_date else None
+            str_end = end_date.strftime("%Y-%m-%d %H:%M:%S") if end_date else None
             df_hist = backend_get_market_data(
                 security_id=security_id,
+                start_date=str_start,
+                end_date=str_end,
                 repo=self.repo,
             )
 

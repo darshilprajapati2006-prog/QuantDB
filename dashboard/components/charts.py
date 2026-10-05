@@ -78,6 +78,17 @@ def _render_chart(fig: go.Figure):
         st.plotly_chart(fig, use_container_width=True)
 
 
+def _downsample_for_chart(df: pd.DataFrame, max_points: int = 500) -> pd.DataFrame:
+    """Downsamples large time-series datasets for smooth web rendering while preserving bounds."""
+    if len(df) <= max_points:
+        return df
+    step = len(df) // max_points + 1
+    sampled = df.iloc[::step]
+    if sampled.index[-1] != df.index[-1]:
+        sampled = pd.concat([sampled, df.iloc[[-1]]])
+    return sampled
+
+
 def render_candlestick_chart(df: pd.DataFrame, symbol: str = "TICKER", height: int = 440):
     """
     Renders a 2-row subplot with Candlestick price on top and Volume bars below.
@@ -87,7 +98,7 @@ def render_candlestick_chart(df: pd.DataFrame, symbol: str = "TICKER", height: i
         st.info("No market data available to render candlestick chart.")
         return
 
-    # Calculate rolling averages if enough data
+    # Calculate rolling averages on full dataset first for analytical correctness
     df = df.copy()
     if len(df) >= 20:
         df["sma20"] = df["close_price"].rolling(window=20).mean()
@@ -97,6 +108,9 @@ def render_candlestick_chart(df: pd.DataFrame, symbol: str = "TICKER", height: i
         df["sma50"] = df["close_price"].rolling(window=50).mean()
     else:
         df["sma50"] = np.nan
+
+    # Downsample for visualization if data is very large
+    plot_df = _downsample_for_chart(df, max_points=500)
 
     fig = make_subplots(
         rows=2, cols=1,
@@ -108,11 +122,11 @@ def render_candlestick_chart(df: pd.DataFrame, symbol: str = "TICKER", height: i
     # Candlestick
     fig.add_trace(
         go.Candlestick(
-            x=df["timestamp"],
-            open=df["open_price"],
-            high=df["high_price"],
-            low=df["low_price"],
-            close=df["close_price"],
+            x=plot_df["timestamp"],
+            open=plot_df["open_price"],
+            high=plot_df["high_price"],
+            low=plot_df["low_price"],
+            close=plot_df["close_price"],
             name=f"{symbol} OHLC",
             increasing_line_color=UP_GREEN,
             decreasing_line_color=DOWN_RED,
@@ -123,29 +137,29 @@ def render_candlestick_chart(df: pd.DataFrame, symbol: str = "TICKER", height: i
     )
 
     # SMA Overlays
-    if not df["sma20"].isna().all():
+    if not plot_df["sma20"].isna().all():
         fig.add_trace(
             go.Scatter(
-                x=df["timestamp"], y=df["sma20"],
+                x=plot_df["timestamp"], y=plot_df["sma20"],
                 name="SMA 20", line=dict(color="#38BDF8", width=1.2)
             ),
             row=1, col=1
         )
-    if not df["sma50"].isna().all():
+    if not plot_df["sma50"].isna().all():
         fig.add_trace(
             go.Scatter(
-                x=df["timestamp"], y=df["sma50"],
+                x=plot_df["timestamp"], y=plot_df["sma50"],
                 name="SMA 50", line=dict(color="#F59E0B", width=1.2)
             ),
             row=1, col=1
         )
 
     # Volume Bars
-    vol_colors = [UP_GREEN if c >= o else DOWN_RED for o, c in zip(df["open_price"], df["close_price"])]
+    vol_colors = [UP_GREEN if c >= o else DOWN_RED for o, c in zip(plot_df["open_price"], plot_df["close_price"])]
     fig.add_trace(
         go.Bar(
-            x=df["timestamp"],
-            y=df["volume"],
+            x=plot_df["timestamp"],
+            y=plot_df["volume"],
             name="Volume",
             marker_color=vol_colors,
             opacity=0.6,
@@ -184,13 +198,14 @@ def render_equity_curve(df: pd.DataFrame, title: str = "PORTFOLIO EQUITY CURVE",
         st.info("No equity curve data available.")
         return
 
+    plot_df = _downsample_for_chart(df, max_points=500)
     fig = go.Figure()
 
     # Portfolio Equity Line
     fig.add_trace(
         go.Scatter(
-            x=df["timestamp"],
-            y=df["portfolio_value"],
+            x=plot_df["timestamp"],
+            y=plot_df["portfolio_value"],
             mode="lines",
             name="Portfolio Value",
             line=dict(color=CYAN_ACCENT, width=2.2),
@@ -200,11 +215,11 @@ def render_equity_curve(df: pd.DataFrame, title: str = "PORTFOLIO EQUITY CURVE",
     )
 
     # Benchmark Comparative Line
-    if include_benchmark and "benchmark_value" in df.columns:
+    if include_benchmark and "benchmark_value" in plot_df.columns:
         fig.add_trace(
             go.Scatter(
-                x=df["timestamp"],
-                y=df["benchmark_value"],
+                x=plot_df["timestamp"],
+                y=plot_df["benchmark_value"],
                 mode="lines",
                 name="S&P 500 Benchmark",
                 line=dict(color=BENCHMARK_COLOR, width=1.5, dash="dash"),
@@ -217,17 +232,18 @@ def render_equity_curve(df: pd.DataFrame, title: str = "PORTFOLIO EQUITY CURVE",
 
 def render_drawdown_chart(df: pd.DataFrame, title: str = "HISTORICAL DRAWDOWN (%)", height: int = 240):
     """Renders underwater drawdown chart filled in semi-transparent red."""
-    if df.empty or "drawdown_pct" not in df.columns and "drawdown" not in df.columns:
+    if df.empty or ("drawdown_pct" not in df.columns and "drawdown" not in df.columns):
         st.info("No drawdown data available.")
         return
 
-    col = "drawdown_pct" if "drawdown_pct" in df.columns else "drawdown"
+    plot_df = _downsample_for_chart(df, max_points=500)
+    col = "drawdown_pct" if "drawdown_pct" in plot_df.columns else "drawdown"
 
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
-            x=df["timestamp"],
-            y=df[col],
+            x=plot_df["timestamp"],
+            y=plot_df[col],
             mode="lines",
             name="Drawdown %",
             line=dict(color=DOWN_RED, width=1.5),
@@ -246,13 +262,14 @@ def render_returns_chart(df: pd.DataFrame, title: str = "DAILY RETURNS (%)", hei
         st.info("No returns data available.")
         return
 
-    colors = [UP_GREEN if r >= 0 else DOWN_RED for r in df["daily_return"]]
+    plot_df = _downsample_for_chart(df, max_points=500)
+    colors = [UP_GREEN if r >= 0 else DOWN_RED for r in plot_df["daily_return"]]
 
     fig = go.Figure()
     fig.add_trace(
         go.Bar(
-            x=df["timestamp"],
-            y=df["daily_return"],
+            x=plot_df["timestamp"],
+            y=plot_df["daily_return"],
             name="Daily Return %",
             marker_color=colors,
         )

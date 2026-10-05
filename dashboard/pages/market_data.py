@@ -122,12 +122,14 @@ price_change_pct = (price_change / prev_row["close_price"]) * 100 if prev_row["c
 m_col1, m_col2, m_col3, m_col4, m_col5, m_col6 = st.columns(6)
 
 with m_col1:
+    ts_val = latest_row["timestamp"]
+    ts_label = ts_val.strftime("%Y-%m-%d") if hasattr(ts_val, "strftime") else str(ts_val)[:10]
     render_metric_card(
         title="LAST CLOSE",
         value=format_currency(latest_row["close_price"]),
         change=f"{price_change:+.2f} ({price_change_pct:+.2f}%)",
         is_positive=price_change >= 0,
-        description=f"Close as of {latest_row['timestamp'].strftime('%Y-%m-%d')}"
+        description=f"Close as of {ts_label}"
     )
 
 with m_col2:
