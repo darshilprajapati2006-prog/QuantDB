@@ -11,6 +11,7 @@ Important:
 """
 
 from typing import Any, Dict, List, Optional
+from .connection import DatabaseConnectionError
 
 
 # ============================================================
@@ -992,13 +993,24 @@ FROM orders;
 # QUERY EXECUTION HELPERS (USED BY REPOSITORY LAYER)
 # ============================================================
 
+def _check_conn(conn):
+    if conn is None:
+        raise DatabaseConnectionError("Database connection is None.")
+
+def _close_cursor(cursor):
+    if cursor is not None and hasattr(cursor, "close"):
+        try:
+            _close_cursor(cursor)
+        except Exception:
+            pass
+
 def get_user_by_id(conn, user_id: int) -> Optional[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(GET_USER_BY_ID, (user_id,))
         return cursor.fetchone()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_user_by_email(conn, email: str) -> Optional[Dict[str, Any]]:
@@ -1007,7 +1019,7 @@ def get_user_by_email(conn, email: str) -> Optional[Dict[str, Any]]:
         cursor.execute(GET_USER_BY_EMAIL, (email,))
         return cursor.fetchone()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_user_by_username(conn, username: str) -> Optional[Dict[str, Any]]:
@@ -1016,7 +1028,7 @@ def get_user_by_username(conn, username: str) -> Optional[Dict[str, Any]]:
         cursor.execute(GET_USER_BY_USERNAME, (username,))
         return cursor.fetchone()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_user_by_identifier(conn, identifier: str) -> Optional[Dict[str, Any]]:
@@ -1025,7 +1037,7 @@ def get_user_by_identifier(conn, identifier: str) -> Optional[Dict[str, Any]]:
         cursor.execute(GET_USER_BY_IDENTIFIER, (identifier, identifier))
         return cursor.fetchone()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_all_users(conn) -> List[Dict[str, Any]]:
@@ -1034,7 +1046,7 @@ def get_all_users(conn) -> List[Dict[str, Any]]:
         cursor.execute(GET_ALL_USERS)
         return cursor.fetchall()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def update_user_role(conn, user_id: int, role: str) -> bool:
@@ -1044,7 +1056,7 @@ def update_user_role(conn, user_id: int, role: str) -> bool:
         conn.commit()
         return cursor.rowcount > 0
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def update_user_status(conn, user_id: int, status: str) -> bool:
@@ -1054,7 +1066,7 @@ def update_user_status(conn, user_id: int, status: str) -> bool:
         conn.commit()
         return cursor.rowcount > 0
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def update_user_password(conn, user_id: int, password_hash: str) -> bool:
@@ -1064,7 +1076,7 @@ def update_user_password(conn, user_id: int, password_hash: str) -> bool:
         conn.commit()
         return cursor.rowcount > 0
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def update_user_verified(conn, user_id: int, is_verified: bool = True) -> bool:
@@ -1074,7 +1086,7 @@ def update_user_verified(conn, user_id: int, is_verified: bool = True) -> bool:
         conn.commit()
         return cursor.rowcount > 0
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def update_unverified_user(
@@ -1090,7 +1102,7 @@ def update_unverified_user(
         conn.commit()
         return cursor.rowcount > 0
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def create_user(
@@ -1115,7 +1127,7 @@ def create_user(
         conn.commit()
         return cursor.lastrowid
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def insert_email_otp(
@@ -1139,7 +1151,7 @@ def insert_email_otp(
         conn.commit()
         return cursor.lastrowid
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_latest_otp_for_user(
@@ -1150,7 +1162,7 @@ def get_latest_otp_for_user(
         cursor.execute(GET_LATEST_OTP_FOR_USER, (user_id, purpose))
         return cursor.fetchone()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def increment_otp_attempts(conn, otp_id: int) -> bool:
@@ -1160,7 +1172,7 @@ def increment_otp_attempts(conn, otp_id: int) -> bool:
         conn.commit()
         return cursor.rowcount > 0
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def mark_otp_verified(conn, otp_id: int) -> bool:
@@ -1172,7 +1184,7 @@ def mark_otp_verified(conn, otp_id: int) -> bool:
         conn.commit()
         return cursor.rowcount > 0
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def invalidate_user_otps(conn, user_id: int, purpose: str = "REGISTRATION") -> bool:
@@ -1182,7 +1194,7 @@ def invalidate_user_otps(conn, user_id: int, purpose: str = "REGISTRATION") -> b
         conn.commit()
         return cursor.rowcount > 0
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_security_by_id(conn, security_id: int) -> Optional[Dict[str, Any]]:
@@ -1191,7 +1203,7 @@ def get_security_by_id(conn, security_id: int) -> Optional[Dict[str, Any]]:
         cursor.execute(GET_SECURITY_BY_ID, (security_id,))
         return cursor.fetchone()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_all_securities(conn) -> List[Dict[str, Any]]:
@@ -1200,7 +1212,7 @@ def get_all_securities(conn) -> List[Dict[str, Any]]:
         cursor.execute(GET_ALL_SECURITIES)
         return cursor.fetchall()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_market_data(
@@ -1220,7 +1232,7 @@ def get_market_data(
             cursor.execute(GET_MARKET_DATA_BY_SECURITY, (security_id,))
         return cursor.fetchall()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_order_by_id(conn, order_id: int) -> Optional[Dict[str, Any]]:
@@ -1229,7 +1241,7 @@ def get_order_by_id(conn, order_id: int) -> Optional[Dict[str, Any]]:
         cursor.execute(GET_ORDER_BY_ID, (order_id,))
         return cursor.fetchone()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_orders_by_user(conn, user_id: int) -> List[Dict[str, Any]]:
@@ -1238,7 +1250,7 @@ def get_orders_by_user(conn, user_id: int) -> List[Dict[str, Any]]:
         cursor.execute(GET_ORDERS_BY_USER, (user_id,))
         return cursor.fetchall()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_all_orders(conn) -> List[Dict[str, Any]]:
@@ -1247,7 +1259,7 @@ def get_all_orders(conn) -> List[Dict[str, Any]]:
         cursor.execute(GET_ALL_ORDERS)
         return cursor.fetchall()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def insert_order(
@@ -1278,7 +1290,7 @@ def insert_order(
         )
         return cursor.lastrowid
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def update_order_status(conn, order_id: int, order_status: str) -> int:
@@ -1287,7 +1299,7 @@ def update_order_status(conn, order_id: int, order_status: str) -> int:
         cursor.execute(UPDATE_ORDER_STATUS, (order_status, order_id))
         return cursor.rowcount
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_trade_by_id(conn, trade_id: int) -> Optional[Dict[str, Any]]:
@@ -1296,7 +1308,7 @@ def get_trade_by_id(conn, trade_id: int) -> Optional[Dict[str, Any]]:
         cursor.execute(GET_TRADE_BY_ID, (trade_id,))
         return cursor.fetchone()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_trades_by_security(conn, security_id: int) -> List[Dict[str, Any]]:
@@ -1305,7 +1317,7 @@ def get_trades_by_security(conn, security_id: int) -> List[Dict[str, Any]]:
         cursor.execute(GET_TRADES_BY_SECURITY, (security_id,))
         return cursor.fetchall()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_all_trades(conn) -> List[Dict[str, Any]]:
@@ -1314,7 +1326,7 @@ def get_all_trades(conn) -> List[Dict[str, Any]]:
         cursor.execute(GET_ALL_TRADES)
         return cursor.fetchall()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def insert_trade(
@@ -1343,7 +1355,7 @@ def insert_trade(
         )
         return cursor.lastrowid
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_portfolio_by_id(conn, portfolio_id: int) -> Optional[Dict[str, Any]]:
@@ -1352,7 +1364,7 @@ def get_portfolio_by_id(conn, portfolio_id: int) -> Optional[Dict[str, Any]]:
         cursor.execute(GET_PORTFOLIO_BY_ID, (portfolio_id,))
         return cursor.fetchone()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_portfolios_by_user(conn, user_id: int) -> List[Dict[str, Any]]:
@@ -1361,7 +1373,7 @@ def get_portfolios_by_user(conn, user_id: int) -> List[Dict[str, Any]]:
         cursor.execute(GET_PORTFOLIOS_BY_USER, (user_id,))
         return cursor.fetchall()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_all_portfolios(conn) -> List[Dict[str, Any]]:
@@ -1370,7 +1382,7 @@ def get_all_portfolios(conn) -> List[Dict[str, Any]]:
         cursor.execute(GET_ALL_PORTFOLIOS)
         return cursor.fetchall()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_position(
@@ -1386,7 +1398,7 @@ def get_position(
         )
         return cursor.fetchone()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_positions_by_portfolio(
@@ -1398,7 +1410,7 @@ def get_positions_by_portfolio(
         cursor.execute(GET_POSITIONS_BY_PORTFOLIO, (portfolio_id,))
         return cursor.fetchall()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_strategy_by_id(conn, strategy_id: int) -> Optional[Dict[str, Any]]:
@@ -1407,7 +1419,7 @@ def get_strategy_by_id(conn, strategy_id: int) -> Optional[Dict[str, Any]]:
         cursor.execute(GET_STRATEGY_BY_ID, (strategy_id,))
         return cursor.fetchone()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_strategies_by_user(conn, user_id: int) -> List[Dict[str, Any]]:
@@ -1416,7 +1428,7 @@ def get_strategies_by_user(conn, user_id: int) -> List[Dict[str, Any]]:
         cursor.execute(GET_STRATEGIES_BY_USER, (user_id,))
         return cursor.fetchall()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_all_strategies(conn) -> List[Dict[str, Any]]:
@@ -1425,7 +1437,7 @@ def get_all_strategies(conn) -> List[Dict[str, Any]]:
         cursor.execute(GET_ACTIVE_STRATEGIES)
         return cursor.fetchall()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def insert_strategy(
@@ -1454,7 +1466,7 @@ def insert_strategy(
         )
         return cursor.lastrowid
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_backtest_by_id(conn, backtest_id: int) -> Optional[Dict[str, Any]]:
@@ -1463,7 +1475,7 @@ def get_backtest_by_id(conn, backtest_id: int) -> Optional[Dict[str, Any]]:
         cursor.execute(GET_BACKTEST_BY_ID, (backtest_id,))
         return cursor.fetchone()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_backtests_by_strategy(
@@ -1475,7 +1487,7 @@ def get_backtests_by_strategy(
         cursor.execute(GET_BACKTESTS_BY_STRATEGY, (strategy_id,))
         return cursor.fetchall()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_all_backtests(conn) -> List[Dict[str, Any]]:
@@ -1484,7 +1496,7 @@ def get_all_backtests(conn) -> List[Dict[str, Any]]:
         cursor.execute(GET_ALL_BACKTESTS)
         return cursor.fetchall()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_backtest_result(conn, backtest_id: int) -> Optional[Dict[str, Any]]:
@@ -1493,7 +1505,7 @@ def get_backtest_result(conn, backtest_id: int) -> Optional[Dict[str, Any]]:
         cursor.execute(GET_BACKTEST_RESULT, (backtest_id,))
         return cursor.fetchone()
     finally:
-        cursor.close()
+        _close_cursor(cursor)
 
 
 def get_risk_metrics(
@@ -1511,4 +1523,4 @@ def get_risk_metrics(
             return cursor.fetchall()
         return []
     finally:
-        cursor.close()
+        _close_cursor(cursor)
