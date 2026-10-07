@@ -26,6 +26,7 @@ SELECT
     password_hash,
     role,
     status,
+    is_verified,
     created_at
 FROM users
 WHERE user_id = %s;
@@ -40,6 +41,7 @@ SELECT
     password_hash,
     role,
     status,
+    is_verified,
     created_at
 FROM users
 WHERE email = %s;
@@ -54,6 +56,7 @@ SELECT
     password_hash,
     role,
     status,
+    is_verified,
     created_at
 FROM users
 WHERE username = %s;
@@ -68,6 +71,7 @@ SELECT
     password_hash,
     role,
     status,
+    is_verified,
     created_at
 FROM users
 WHERE username = %s OR email = %s
@@ -82,6 +86,7 @@ SELECT
     email,
     role,
     status,
+    is_verified,
     created_at
 FROM users
 ORDER BY user_id;
@@ -105,6 +110,21 @@ SET password_hash = %s
 WHERE user_id = %s;
 """
 
+UPDATE_USER_VERIFIED = """
+UPDATE users
+SET is_verified = %s
+WHERE user_id = %s;
+"""
+
+UPDATE_UNVERIFIED_USER = """
+UPDATE users
+SET name = %s,
+    username = %s,
+    password_hash = %s,
+    created_at = %s
+WHERE user_id = %s AND is_verified = FALSE;
+"""
+
 CREATE_USER = """
 INSERT INTO users (
     username,
@@ -113,8 +133,63 @@ INSERT INTO users (
     password_hash,
     role,
     status,
+    is_verified,
     created_at
-) VALUES (%s, %s, %s, %s, %s, %s, %s);
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+"""
+
+# ============================================================
+# EMAIL OTP & VERIFICATION
+# ============================================================
+
+INSERT_EMAIL_OTP = """
+INSERT INTO email_otps (
+    user_id,
+    otp_hash,
+    purpose,
+    expires_at,
+    attempt_count,
+    max_attempts,
+    is_used,
+    created_at
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+"""
+
+GET_LATEST_OTP_FOR_USER = """
+SELECT
+    otp_id,
+    user_id,
+    otp_hash,
+    purpose,
+    expires_at,
+    attempt_count,
+    max_attempts,
+    is_used,
+    created_at,
+    verified_at
+FROM email_otps
+WHERE user_id = %s AND purpose = %s AND is_used = FALSE
+ORDER BY created_at DESC
+LIMIT 1;
+"""
+
+INCREMENT_OTP_ATTEMPTS = """
+UPDATE email_otps
+SET attempt_count = attempt_count + 1
+WHERE otp_id = %s;
+"""
+
+MARK_OTP_VERIFIED = """
+UPDATE email_otps
+SET is_used = TRUE,
+    verified_at = %s
+WHERE otp_id = %s;
+"""
+
+INVALIDATE_USER_OTPS = """
+UPDATE email_otps
+SET is_used = TRUE
+WHERE user_id = %s AND purpose = %s;
 """
 
 
@@ -992,6 +1067,32 @@ def update_user_password(conn, user_id: int, password_hash: str) -> bool:
         cursor.close()
 
 
+def update_user_verified(conn, user_id: int, is_verified: bool = True) -> bool:
+    cursor = conn.cursor()
+    try:
+        cursor.execute(UPDATE_USER_VERIFIED, (is_verified, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        cursor.close()
+
+
+def update_unverified_user(
+    conn, user_id: int, name: str, username: str, password_hash: str
+) -> bool:
+    cursor = conn.cursor()
+    try:
+        from datetime import datetime
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            UPDATE_UNVERIFIED_USER, (name, username, password_hash, now, user_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        cursor.close()
+
+
 def create_user(
     conn,
     username: str,
@@ -1000,6 +1101,7 @@ def create_user(
     password_hash: str,
     role: str,
     status: str = "ACTIVE",
+    is_verified: bool = False,
     created_at: Optional[str] = None,
 ) -> int:
     cursor = conn.cursor()
@@ -1008,10 +1110,77 @@ def create_user(
         now = created_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute(
             CREATE_USER,
-            (username, name, email, password_hash, role, status, now),
+            (username, name, email, password_hash, role, status, is_verified, now),
         )
         conn.commit()
         return cursor.lastrowid
+    finally:
+        cursor.close()
+
+
+def insert_email_otp(
+    conn,
+    user_id: int,
+    otp_hash: str,
+    purpose: str = "REGISTRATION",
+    expires_at: Optional[str] = None,
+    max_attempts: int = 5,
+) -> int:
+    cursor = conn.cursor()
+    try:
+        from datetime import datetime, timedelta
+        now_dt = datetime.now()
+        now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+        exp_str = expires_at or (now_dt + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            INSERT_EMAIL_OTP,
+            (user_id, otp_hash, purpose, exp_str, 0, max_attempts, False, now_str),
+        )
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        cursor.close()
+
+
+def get_latest_otp_for_user(
+    conn, user_id: int, purpose: str = "REGISTRATION"
+) -> Optional[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_LATEST_OTP_FOR_USER, (user_id, purpose))
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+
+
+def increment_otp_attempts(conn, otp_id: int) -> bool:
+    cursor = conn.cursor()
+    try:
+        cursor.execute(INCREMENT_OTP_ATTEMPTS, (otp_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        cursor.close()
+
+
+def mark_otp_verified(conn, otp_id: int) -> bool:
+    cursor = conn.cursor()
+    try:
+        from datetime import datetime
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(MARK_OTP_VERIFIED, (now, otp_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        cursor.close()
+
+
+def invalidate_user_otps(conn, user_id: int, purpose: str = "REGISTRATION") -> bool:
+    cursor = conn.cursor()
+    try:
+        cursor.execute(INVALIDATE_USER_OTPS, (user_id, purpose))
+        conn.commit()
+        return cursor.rowcount > 0
     finally:
         cursor.close()
 

@@ -177,11 +177,11 @@ with admin_tab1:
     users_list = get_platform_users()
     if users_list:
         users_df = pd.DataFrame(users_list)
-        # Ensure display columns match schema; strictly omit password hashes
-        display_cols = [c for c in ["user_id", "username", "name", "email", "role", "status", "created_at"] if c in users_df.columns]
+        # Ensure display columns match schema; strictly omit password hashes and OTP hashes
+        display_cols = [c for c in ["user_id", "username", "name", "email", "role", "is_verified", "status", "created_at"] if c in users_df.columns]
         users_df = users_df[display_cols]
     else:
-        users_df = pd.DataFrame(columns=["user_id", "username", "name", "email", "role", "status", "created_at"])
+        users_df = pd.DataFrame(columns=["user_id", "username", "name", "email", "role", "is_verified", "status", "created_at"])
 
     render_dataframe(
         users_df,
@@ -191,6 +191,7 @@ with admin_tab1:
             "name": st.column_config.TextColumn("Full Name"),
             "email": st.column_config.TextColumn("Email Address"),
             "role": st.column_config.TextColumn("Assigned Role"),
+            "is_verified": st.column_config.CheckboxColumn("Verified"),
             "status": st.column_config.TextColumn("Account Status"),
             "created_at": st.column_config.TextColumn("Created Timestamp"),
         },
