@@ -7,7 +7,7 @@ and the database query layer.
 
 from typing import Any, Optional
 
-from .connection import get_connection
+from .connection import get_connection, DatabaseConnectionError, get_last_connection_error
 from . import queries
 
 
@@ -19,7 +19,20 @@ class Repository:
 
     def _get_connection(self):
         """Create and return a database connection."""
-        return get_connection()
+        conn = get_connection(raise_on_error=True)
+        if conn is None:
+            err = get_last_connection_error() or "Database connection returned None."
+            raise DatabaseConnectionError(f"Database connection failed: {err}")
+        return conn
+
+    @staticmethod
+    def _close_conn(conn):
+        """Safely close database connection without throwing on None or dropped sockets."""
+        if conn is not None and hasattr(conn, "close"):
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     # =========================================================
     # USERS
@@ -30,63 +43,63 @@ class Repository:
         try:
             return queries.get_user_by_id(conn, user_id)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def get_user_by_email(self, email: str):
         conn = self._get_connection()
         try:
             return queries.get_user_by_email(conn, email)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def get_user_by_username(self, username: str):
         conn = self._get_connection()
         try:
             return queries.get_user_by_username(conn, username)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def get_user_by_identifier(self, identifier: str):
         conn = self._get_connection()
         try:
             return queries.get_user_by_identifier(conn, identifier)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def get_users(self):
         conn = self._get_connection()
         try:
             return queries.get_all_users(conn)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def update_user_role(self, user_id: int, role: str):
         conn = self._get_connection()
         try:
             return queries.update_user_role(conn, user_id, role)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def update_user_status(self, user_id: int, status: str):
         conn = self._get_connection()
         try:
             return queries.update_user_status(conn, user_id, status)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def update_user_password(self, user_id: int, password_hash: str):
         conn = self._get_connection()
         try:
             return queries.update_user_password(conn, user_id, password_hash)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def update_user_verified(self, user_id: int, is_verified: bool = True):
         conn = self._get_connection()
         try:
             return queries.update_user_verified(conn, user_id, is_verified)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def update_unverified_user(
         self, user_id: int, name: str, username: str, password_hash: str
@@ -97,7 +110,7 @@ class Repository:
                 conn, user_id, name, username, password_hash
             )
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def create_user(
         self,
@@ -115,7 +128,7 @@ class Repository:
                 conn, username, name, email, password_hash, role, status, is_verified
             )
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def insert_email_otp(
         self,
@@ -131,7 +144,7 @@ class Repository:
                 conn, user_id, otp_hash, purpose, expires_at, max_attempts
             )
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def get_latest_otp_for_user(
         self, user_id: int, purpose: str = "REGISTRATION"
@@ -140,28 +153,28 @@ class Repository:
         try:
             return queries.get_latest_otp_for_user(conn, user_id, purpose)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def increment_otp_attempts(self, otp_id: int):
         conn = self._get_connection()
         try:
             return queries.increment_otp_attempts(conn, otp_id)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def mark_otp_verified(self, otp_id: int):
         conn = self._get_connection()
         try:
             return queries.mark_otp_verified(conn, otp_id)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def invalidate_user_otps(self, user_id: int, purpose: str = "REGISTRATION"):
         conn = self._get_connection()
         try:
             return queries.invalidate_user_otps(conn, user_id, purpose)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     # =========================================================
     # SECURITIES
@@ -172,14 +185,14 @@ class Repository:
         try:
             return queries.get_security_by_id(conn, security_id)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def get_securities(self):
         conn = self._get_connection()
         try:
             return queries.get_all_securities(conn)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     # =========================================================
     # MARKET DATA
@@ -200,7 +213,7 @@ class Repository:
                 end_time,
             )
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     # =========================================================
     # ORDERS
@@ -211,7 +224,7 @@ class Repository:
         try:
             return queries.get_order_by_id(conn, order_id)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def get_orders(self, user_id: Optional[int] = None):
         conn = self._get_connection()
@@ -221,7 +234,7 @@ class Repository:
 
             return queries.get_all_orders(conn)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def create_order(
         self,
@@ -257,7 +270,7 @@ class Repository:
             raise
 
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def update_order_status(
         self,
@@ -281,7 +294,7 @@ class Repository:
             raise
 
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     # =========================================================
     # TRADES
@@ -292,7 +305,7 @@ class Repository:
         try:
             return queries.get_trade_by_id(conn, trade_id)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def get_trades(self, security_id: Optional[int] = None):
         conn = self._get_connection()
@@ -305,7 +318,7 @@ class Repository:
 
             return queries.get_all_trades(conn)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def create_trade(
         self,
@@ -339,7 +352,7 @@ class Repository:
             raise
 
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     # =========================================================
     # PORTFOLIOS
@@ -353,7 +366,7 @@ class Repository:
                 portfolio_id,
             )
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def get_portfolios(self, user_id: Optional[int] = None):
         conn = self._get_connection()
@@ -366,7 +379,7 @@ class Repository:
 
             return queries.get_all_portfolios(conn)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     # =========================================================
     # POSITIONS
@@ -386,7 +399,7 @@ class Repository:
                 security_id,
             )
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def get_positions(self, portfolio_id: int):
         conn = self._get_connection()
@@ -397,7 +410,7 @@ class Repository:
                 portfolio_id,
             )
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     # =========================================================
     # STRATEGIES
@@ -412,7 +425,7 @@ class Repository:
                 strategy_id,
             )
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def get_strategies(self, user_id: Optional[int] = None):
         conn = self._get_connection()
@@ -426,7 +439,7 @@ class Repository:
 
             return queries.get_all_strategies(conn)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def create_strategy(
         self,
@@ -460,7 +473,7 @@ class Repository:
             raise
 
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     # =========================================================
     # BACKTESTS
@@ -475,7 +488,7 @@ class Repository:
                 backtest_id,
             )
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     def get_backtests(self, strategy_id: Optional[int] = None):
         conn = self._get_connection()
@@ -489,7 +502,7 @@ class Repository:
 
             return queries.get_all_backtests(conn)
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     # =========================================================
     # BACKTEST RESULTS
@@ -504,7 +517,7 @@ class Repository:
                 backtest_id,
             )
         finally:
-            conn.close()
+            self._close_conn(conn)
 
     # =========================================================
     # RISK METRICS
@@ -524,7 +537,7 @@ class Repository:
                 backtest_id,
             )
         finally:
-            conn.close()
+            self._close_conn(conn)
 
 
 # =============================================================

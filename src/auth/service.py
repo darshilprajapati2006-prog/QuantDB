@@ -265,7 +265,12 @@ def issue_and_send_otp(
         repo = Repository()
 
     # Check resend cooldown against latest active OTP
-    latest_otp = repo.get_latest_otp_for_user(user_id, purpose="REGISTRATION")
+    try:
+        latest_otp = repo.get_latest_otp_for_user(user_id, purpose="REGISTRATION")
+    except Exception as e:
+        logger.error(f"Database error checking latest OTP: {e}")
+        raise OTPError(f"Database error during verification code check: {e}")
+
     if latest_otp and not latest_otp.get("is_used"):
         created_at_dt = _parse_datetime(latest_otp.get("created_at"))
         if created_at_dt:
@@ -277,9 +282,6 @@ def issue_and_send_otp(
                     seconds_remaining=max(1, remaining),
                 )
 
-    # Invalidate previous OTPs for this registration
-    repo.invalidate_user_otps(user_id, purpose="REGISTRATION")
-
     # Generate cryptographically secure 6-digit OTP
     otp = generate_otp(length=6)
     otp_hash = hash_otp(otp)
@@ -288,13 +290,19 @@ def issue_and_send_otp(
     expires_at = (datetime.now() + timedelta(seconds=OTP_EXPIRY_SECONDS)).strftime(
         "%Y-%m-%d %H:%M:%S"
     )
-    repo.insert_email_otp(
-        user_id=user_id,
-        otp_hash=otp_hash,
-        purpose="REGISTRATION",
-        expires_at=expires_at,
-        max_attempts=OTP_MAX_ATTEMPTS,
-    )
+    try:
+        # Invalidate previous OTPs for this registration
+        repo.invalidate_user_otps(user_id, purpose="REGISTRATION")
+        repo.insert_email_otp(
+            user_id=user_id,
+            otp_hash=otp_hash,
+            purpose="REGISTRATION",
+            expires_at=expires_at,
+            max_attempts=OTP_MAX_ATTEMPTS,
+        )
+    except Exception as e:
+        logger.error(f"Database error persisting OTP: {e}")
+        raise OTPError(f"Database error saving verification code: {e}")
 
     # Dispatch email
     sent = send_otp_email(
@@ -358,8 +366,12 @@ def register_user(
         )
 
     # Step 3: Check for existing accounts
-    existing_by_uname = repo.get_user_by_username(clean_username)
-    existing_by_email = repo.get_user_by_email(clean_email)
+    try:
+        existing_by_uname = repo.get_user_by_username(clean_username)
+        existing_by_email = repo.get_user_by_email(clean_email)
+    except Exception as e:
+        logger.error(f"Database error during registration lookup: {e}")
+        raise RegistrationError(f"Registration database error: {e}")
 
     if existing_by_uname and existing_by_uname.get("is_verified"):
         raise RegistrationError("Username is already taken. Please choose another.")
@@ -369,33 +381,37 @@ def register_user(
     pwd_hash = hash_password(password)
 
     # Step 4: Handle pending unverified accounts or create new account
-    if existing_by_uname and not existing_by_uname.get("is_verified"):
-        user_id = existing_by_uname["user_id"]
-        repo.update_unverified_user(
-            user_id=user_id,
-            name=clean_name,
-            username=clean_username,
-            password_hash=pwd_hash,
-        )
-    elif existing_by_email and not existing_by_email.get("is_verified"):
-        user_id = existing_by_email["user_id"]
-        repo.update_unverified_user(
-            user_id=user_id,
-            name=clean_name,
-            username=clean_username,
-            password_hash=pwd_hash,
-        )
-    else:
-        # Create fresh unverified record
-        user_id = repo.create_user(
-            username=clean_username,
-            name=clean_name,
-            email=clean_email,
-            password_hash=pwd_hash,
-            role=target_role,
-            status="ACTIVE",
-            is_verified=False,
-        )
+    try:
+        if existing_by_uname and not existing_by_uname.get("is_verified"):
+            user_id = existing_by_uname["user_id"]
+            repo.update_unverified_user(
+                user_id=user_id,
+                name=clean_name,
+                username=clean_username,
+                password_hash=pwd_hash,
+            )
+        elif existing_by_email and not existing_by_email.get("is_verified"):
+            user_id = existing_by_email["user_id"]
+            repo.update_unverified_user(
+                user_id=user_id,
+                name=clean_name,
+                username=clean_username,
+                password_hash=pwd_hash,
+            )
+        else:
+            # Create fresh unverified record
+            user_id = repo.create_user(
+                username=clean_username,
+                name=clean_name,
+                email=clean_email,
+                password_hash=pwd_hash,
+                role=target_role,
+                status="ACTIVE",
+                is_verified=False,
+            )
+    except Exception as e:
+        logger.error(f"Database error during registration persistence: {e}")
+        raise RegistrationError(f"Registration database error: {e}")
 
     # Step 5: Issue and send OTP
     otp_info = issue_and_send_otp(
@@ -441,7 +457,12 @@ def verify_registration_otp(
     if not clean_otp.isdigit() or len(clean_otp) != 6:
         raise OTPVerificationError("Verification code must be exactly 6 digits.")
 
-    latest_otp = repo.get_latest_otp_for_user(user_id, purpose="REGISTRATION")
+    try:
+        latest_otp = repo.get_latest_otp_for_user(user_id, purpose="REGISTRATION")
+    except Exception as e:
+        logger.error(f"Database error during OTP lookup: {e}")
+        raise OTPVerificationError(f"Database error during verification code lookup: {e}")
+
     if not latest_otp or latest_otp.get("is_used"):
         raise OTPVerificationError(
             "No active verification code found. Please request a new code."
@@ -451,7 +472,10 @@ def verify_registration_otp(
     max_attempts = int(latest_otp.get("max_attempts", OTP_MAX_ATTEMPTS))
 
     if attempt_count >= max_attempts:
-        repo.invalidate_user_otps(user_id, purpose="REGISTRATION")
+        try:
+            repo.invalidate_user_otps(user_id, purpose="REGISTRATION")
+        except Exception:
+            pass
         raise OTPVerificationError(
             "Maximum verification attempts exceeded. Please request a new code."
         )
@@ -466,10 +490,16 @@ def verify_registration_otp(
     # Compare hash
     otp_hash = latest_otp.get("otp_hash", "")
     if not verify_otp_hash(clean_otp, otp_hash):
-        repo.increment_otp_attempts(latest_otp["otp_id"])
+        try:
+            repo.increment_otp_attempts(latest_otp["otp_id"])
+        except Exception:
+            pass
         new_attempts = attempt_count + 1
         if new_attempts >= max_attempts:
-            repo.invalidate_user_otps(user_id, purpose="REGISTRATION")
+            try:
+                repo.invalidate_user_otps(user_id, purpose="REGISTRATION")
+            except Exception:
+                pass
             raise OTPVerificationError(
                 "Incorrect verification code. Maximum attempts exceeded. Please request a new code."
             )
@@ -479,8 +509,12 @@ def verify_registration_otp(
         )
 
     # Match confirmed! Mark OTP as used and mark user account as verified
-    repo.mark_otp_verified(latest_otp["otp_id"])
-    repo.update_user_verified(user_id, is_verified=True)
+    try:
+        repo.mark_otp_verified(latest_otp["otp_id"])
+        repo.update_user_verified(user_id, is_verified=True)
+    except Exception as e:
+        logger.error(f"Database error finalizing verification: {e}")
+        raise OTPVerificationError(f"Database error finalizing verification: {e}")
     logger.info(f"User user_id={user_id} successfully verified email.")
     return True
 
@@ -495,10 +529,14 @@ def resend_registration_otp(
     if repo is None:
         repo = Repository()
 
-    if isinstance(identifier_or_user_id, int):
-        user = repo.get_user(identifier_or_user_id)
-    else:
-        user = repo.get_user_by_identifier(str(identifier_or_user_id).strip())
+    try:
+        if isinstance(identifier_or_user_id, int):
+            user = repo.get_user(identifier_or_user_id)
+        else:
+            user = repo.get_user_by_identifier(str(identifier_or_user_id).strip())
+    except Exception as e:
+        logger.error(f"Database error during OTP resend user lookup: {e}")
+        raise RegistrationError(f"Database error during code resend: {e}")
 
     if not user:
         raise RegistrationError("User account not found.")
