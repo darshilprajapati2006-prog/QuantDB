@@ -102,30 +102,39 @@ class Repository:
             self._close_conn(conn)
 
     def update_unverified_user(
-        self, user_id: int, name: str, username: str, password_hash: str
+        self, user_id: int, name: str, *args, username: Optional[str] = None, password_hash: str = "", **kwargs
     ):
         conn = self._get_connection()
         try:
             return queries.update_unverified_user(
-                conn, user_id, name, username, password_hash
+                conn, user_id, name, *args, username=username, password_hash=password_hash, **kwargs
             )
         finally:
             self._close_conn(conn)
 
     def create_user(
         self,
-        username: str,
-        name: str,
-        email: str,
-        password_hash: str,
-        role: str,
+        name: str = "",
+        email: str = "",
+        password_hash: str = "",
+        role: str = "USER",
         status: str = "ACTIVE",
-        is_verified: bool = False,
+        created_at: Optional[str] = None,
+        *args,
+        **kwargs,
     ):
         conn = self._get_connection()
         try:
             return queries.create_user(
-                conn, username, name, email, password_hash, role, status, is_verified
+                conn,
+                name=name,
+                email=email,
+                password_hash=password_hash,
+                role=role,
+                status=status,
+                created_at=created_at,
+                *args,
+                **kwargs,
             )
         finally:
             self._close_conn(conn)

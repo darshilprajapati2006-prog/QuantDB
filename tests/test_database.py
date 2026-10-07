@@ -197,3 +197,92 @@ class TestDatabaseConnection:
 
         assert "Registration database error" in str(exc_info.value)
         assert "NoneType" not in str(exc_info.value)
+
+    def test_schema_contract_queries_have_no_username_column(self):
+        """Verifies that none of the user SQL queries reference a physical 'username' column."""
+        from src.database import queries
+
+        assert "username" not in queries.GET_USER_BY_ID.lower()
+        assert "username" not in queries.GET_USER_BY_EMAIL.lower()
+        assert "username" not in queries.GET_USER_BY_IDENTIFIER.lower()
+        assert "username" not in queries.GET_ALL_USERS.lower()
+        assert "username" not in queries.CREATE_USER.lower()
+        assert "username" not in queries.UPDATE_UNVERIFIED_USER.lower()
+
+    def test_create_user_inserts_actual_schema_columns(self):
+        """Verifies that create_user only passes actual schema columns to SQL."""
+        from src.database import queries
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 42
+        mock_conn.cursor.return_value = mock_cursor
+
+        user_id = queries.create_user(
+            mock_conn,
+            name="Alice Trader",
+            email="alice@quantdb.local",
+            password_hash="pbkdf2_hash_value",
+            role="QUANT_TRADER",
+            status="ACTIVE",
+        )
+
+        assert user_id == 42
+        mock_cursor.execute.assert_called_once()
+        sql, params = mock_cursor.execute.call_args[0]
+        # SQL must insert into (name, email, password_hash, role, status, created_at)
+        assert "username" not in sql.lower()
+        assert len(params) == 6
+        assert params[0] == "Alice Trader"
+        assert params[1] == "alice@quantdb.local"
+        assert params[2] == "pbkdf2_hash_value"
+        assert params[3] == "QUANT_TRADER"
+        assert params[4] == "ACTIVE"
+
+    def test_normalize_user_dict_injects_fallback_username_and_verified(self):
+        """Verifies that user dict from actual schema row is normalized with synthetic username and is_verified."""
+        from src.database.queries import _normalize_user_dict
+
+        # Actual Aiven schema row without username or is_verified
+        raw_row = {
+            "user_id": 10,
+            "name": "Bob Smith",
+            "email": "bob.smith@quantdb.local",
+            "password_hash": "hash_xyz",
+            "role": "USER",
+            "status": "ACTIVE",
+            "created_at": "2026-03-01 10:00:00",
+        }
+
+        normalized = _normalize_user_dict(raw_row)
+        assert normalized["username"] == "bob.smith"
+        assert normalized["is_verified"] is True
+        assert normalized["name"] == "Bob Smith"
+
+    @patch("src.database.repository.Repository._get_connection")
+    def test_auth_login_with_actual_schema_row(self, mock_get_conn):
+        """Verifies authentication succeeds when database returns actual schema without username column."""
+        from src.auth.service import authenticate_user
+        from src.auth.password import hash_password
+
+        pwd_hash = hash_password("ValidPassword123!")
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        # Row as returned by Aiven MySQL (no username, no is_verified)
+        mock_cursor.fetchone.return_value = {
+            "user_id": 5,
+            "name": "Aarav Sharma",
+            "email": "aarav@quantdb.com",
+            "password_hash": pwd_hash,
+            "role": "ADMIN",
+            "status": "ACTIVE",
+            "created_at": "2026-01-05 10:00:00",
+        }
+        mock_conn.cursor.return_value = mock_cursor
+        mock_get_conn.return_value = mock_conn
+
+        profile = authenticate_user("aarav@quantdb.com", "ValidPassword123!")
+        assert profile["user_id"] == 5
+        assert profile["email"] == "aarav@quantdb.com"
+        assert profile["role"] == "ADMIN"
+        assert profile["username"] == "aarav"
+        assert profile["is_verified"] is True
