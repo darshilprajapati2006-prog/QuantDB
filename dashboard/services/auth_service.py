@@ -2,7 +2,8 @@
 QuantDB Dashboard Authentication & Authorization Service.
 
 Integrates the presentation layer with backend authentication, handles Streamlit
-session state, user profile caching, and enforces Role-Based Access Control (RBAC).
+session state, user profile caching, enforces Role-Based Access Control (RBAC),
+and provides the Sign Up registration and Email OTP verification workflows.
 """
 
 import logging
@@ -23,9 +24,18 @@ from src.auth.roles import (
 )
 from src.auth.service import (
     authenticate_user as backend_authenticate,
+    register_user as backend_register_user,
+    verify_registration_otp as backend_verify_otp,
+    resend_registration_otp as backend_resend_otp,
     AuthenticationError,
     AccountInactiveError,
+    UnverifiedEmailError,
     AuthorizationError,
+    RegistrationError,
+    OTPError,
+    OTPExpiredError,
+    OTPCooldownError,
+    OTPVerificationError,
 )
 from src.database.repository import Repository
 from dashboard.providers.factory import get_current_data_mode
@@ -42,6 +52,7 @@ MOCK_USERS_SEED: List[Dict[str, Any]] = [
         "password": "User01@QuantDB",
         "role": Role.USER,
         "status": "ACTIVE",
+        "is_verified": True,
     },
     {
         "user_id": 102,
@@ -51,6 +62,7 @@ MOCK_USERS_SEED: List[Dict[str, Any]] = [
         "password": "Trader01@QuantDB",
         "role": Role.QUANT_TRADER,
         "status": "ACTIVE",
+        "is_verified": True,
     },
     {
         "user_id": 103,
@@ -60,6 +72,7 @@ MOCK_USERS_SEED: List[Dict[str, Any]] = [
         "password": "Researcher01@QuantDB",
         "role": Role.QUANT_RESEARCHER,
         "status": "ACTIVE",
+        "is_verified": True,
     },
     {
         "user_id": 104,
@@ -69,12 +82,13 @@ MOCK_USERS_SEED: List[Dict[str, Any]] = [
         "password": "Admin01@QuantDB",
         "role": Role.ADMIN,
         "status": "ACTIVE",
+        "is_verified": True,
     },
 ]
 
 
 def init_session_state() -> None:
-    """Ensures authentication keys are initialized in Streamlit session state."""
+    """Ensures authentication and verification keys are initialized in Streamlit session state."""
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
     if "user_id" not in st.session_state:
@@ -89,6 +103,12 @@ def init_session_state() -> None:
         st.session_state["role"] = None
     if "role_display" not in st.session_state:
         st.session_state["role_display"] = None
+    if "auth_screen" not in st.session_state:
+        st.session_state["auth_screen"] = "signin"
+    if "pending_verification" not in st.session_state:
+        st.session_state["pending_verification"] = None
+    if "otp_msg" not in st.session_state:
+        st.session_state["otp_msg"] = None
 
 
 def is_authenticated() -> bool:
@@ -135,7 +155,7 @@ def login(identifier: str, password: str) -> Tuple[bool, str]:
     try:
         repo = Repository()
         user_info = backend_authenticate(clean_id, password, repo=repo)
-        
+
         # Populate session state
         st.session_state["authenticated"] = True
         st.session_state["user_id"] = user_info["user_id"]
@@ -144,7 +164,20 @@ def login(identifier: str, password: str) -> Tuple[bool, str]:
         st.session_state["email"] = user_info["email"]
         st.session_state["role"] = user_info["role"]
         st.session_state["role_display"] = user_info["role_display"]
+        st.session_state["auth_screen"] = "signin"
+        st.session_state["pending_verification"] = None
         return True, "Authentication successful."
+
+    except UnverifiedEmailError as e:
+        # Prompt user to verify and transition to OTP screen
+        st.session_state["pending_verification"] = {
+            "user_id": e.user_id,
+            "email": e.email,
+            "username": e.username,
+        }
+        st.session_state["auth_screen"] = "verify"
+        st.session_state["otp_msg"] = "Please verify your email before signing in."
+        return False, "Please verify your email before signing in."
 
     except AccountInactiveError as e:
         return False, str(e)
@@ -154,7 +187,10 @@ def login(identifier: str, password: str) -> Tuple[bool, str]:
         if "unavailable" in err_msg.lower():
             # Fallback for offline mock demo
             for mu in MOCK_USERS_SEED:
-                if (mu["username"].lower() == clean_id.lower() or mu["email"].lower() == clean_id.lower()) and mu["password"] == password:
+                if (
+                    mu["username"].lower() == clean_id.lower()
+                    or mu["email"].lower() == clean_id.lower()
+                ) and mu["password"] == password:
                     if mu["status"] != "ACTIVE":
                         return False, "This account is inactive. Please contact administrator."
                     st.session_state["authenticated"] = True
@@ -171,6 +207,80 @@ def login(identifier: str, password: str) -> Tuple[bool, str]:
         return False, "An unexpected error occurred during login. Please try again."
 
 
+def signup(
+    name: str,
+    username: str,
+    email: str,
+    password: str,
+    confirm_password: str,
+    phone: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """
+    Handles user registration and transitions to OTP verification.
+    """
+    init_session_state()
+    try:
+        repo = Repository()
+        res = backend_register_user(
+            name=name,
+            username=username,
+            email=email,
+            password=password,
+            confirm_password=confirm_password,
+            phone=phone,
+            role=Role.USER,
+            repo=repo,
+        )
+        st.session_state["pending_verification"] = {
+            "user_id": res["user_id"],
+            "email": res["email"],
+            "username": res["username"],
+            "name": res["name"],
+        }
+        st.session_state["auth_screen"] = "verify"
+        st.session_state["otp_msg"] = "Verification code sent to your email."
+        return True, "Verification code sent to your email."
+    except RegistrationError as e:
+        return False, str(e)
+    except OTPCooldownError as e:
+        return False, str(e)
+    except Exception as e:
+        logger.error(f"Error during registration: {e}")
+        return False, f"Registration failed: {e}"
+
+
+def verify_otp_code(user_id: int, entered_code: str) -> Tuple[bool, str]:
+    """
+    Submits the 6-digit OTP to the backend service for cryptographic verification.
+    """
+    try:
+        repo = Repository()
+        backend_verify_otp(user_id=user_id, entered_otp=entered_code, repo=repo)
+        st.session_state["pending_verification"] = None
+        st.session_state["auth_screen"] = "verified_success"
+        return True, "Email verified successfully."
+    except (OTPVerificationError, OTPExpiredError, OTPError) as e:
+        return False, str(e)
+    except Exception as e:
+        logger.error(f"Error during OTP verification: {e}")
+        return False, f"Verification failed: {e}"
+
+
+def resend_otp_code(user_id_or_identifier: Any) -> Tuple[bool, str]:
+    """
+    Requests a fresh OTP subject to 60-second cooldown.
+    """
+    try:
+        repo = Repository()
+        backend_resend_otp(user_id_or_identifier, repo=repo)
+        return True, "Verification code resent to your email."
+    except (OTPCooldownError, RegistrationError, OTPError) as e:
+        return False, str(e)
+    except Exception as e:
+        logger.error(f"Error resending OTP: {e}")
+        return False, f"Failed to resend code: {e}"
+
+
 def logout() -> None:
     """Logs out the current session and clears all authentication state."""
     init_session_state()
@@ -181,6 +291,8 @@ def logout() -> None:
     st.session_state["email"] = None
     st.session_state["role"] = None
     st.session_state["role_display"] = None
+    st.session_state["auth_screen"] = "signin"
+    st.session_state["pending_verification"] = None
 
 
 def check_page_access(page_name: str) -> bool:
@@ -197,7 +309,8 @@ def render_access_restricted_banner(page_name: str) -> None:
     role_display = curr_user.get("role_display", "User")
     username = curr_user.get("username", "Guest")
 
-    st.markdown(f"""
+    st.markdown(
+        f"""
         <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 24px; margin: 30px auto; max-width: 750px; text-align: center;">
             <div style="font-size: 2.2rem; margin-bottom: 12px;">🛡️</div>
             <div style="font-size: 1.35rem; font-weight: 800; color: #FCA5A5; letter-spacing: -0.01em; margin-bottom: 8px;">
@@ -210,7 +323,9 @@ def render_access_restricted_banner(page_name: str) -> None:
                 SECURITY STATUS: RBAC DENIED • USER: {username} • ROLE: {role_display}
             </div>
         </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
@@ -219,8 +334,11 @@ def render_access_restricted_banner(page_name: str) -> None:
 
 
 def render_login_screen() -> None:
-    """Renders the QuantDB terminal login screen matching the platform's visual design."""
-    st.markdown("""
+    """Renders the QuantDB terminal authentication, registration, and OTP screens."""
+    init_session_state()
+
+    st.markdown(
+        """
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 35px; margin-bottom: 25px;">
             <div style="background: linear-gradient(135deg, #06B6D4 0%, #3B82F6 100%); width: 44px; height: 44px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 24px; color: #0B0F19; margin-bottom: 12px; box-shadow: 0 4px 14px rgba(6, 182, 212, 0.4);">Q</div>
             <h1 style="margin: 0; font-size: 2.3rem; font-weight: 900; letter-spacing: 0.08em; color: #F8FAFC; font-family: 'JetBrains Mono', monospace;">
@@ -233,59 +351,260 @@ def render_login_screen() -> None:
                 ACADEMIC SIMULATION ENVIRONMENT • SECURE ACCESS GATEWAY
             </div>
         </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
-    # Centered Login Card
-    col_l, col_center, col_r = st.columns([1, 1.25, 1])
+    col_l, col_center, col_r = st.columns([1, 1.4, 1])
     with col_center:
-        st.markdown("""
-            <div style="background: #111827; border: 1px solid #1F2937; border-radius: 10px; padding: 22px 26px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);">
-                <div style="font-size: 0.85rem; font-weight: 700; text-transform: uppercase; color: #E2E8F0; letter-spacing: 0.06em; margin-bottom: 14px; border-bottom: 1px solid #1F2937; padding-bottom: 8px;">
-                    Terminal Authentication
+        auth_mode = st.session_state.get("auth_screen", "signin")
+
+        # -------------------------------------------------------------
+        # SCREEN 1: VERIFIED SUCCESS SCREEN
+        # -------------------------------------------------------------
+        if auth_mode == "verified_success":
+            st.markdown(
+                """
+                <div style="background: #111827; border: 1px solid #10B981; border-radius: 10px; padding: 26px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5); text-align: center;">
+                    <div style="font-size: 2.6rem; margin-bottom: 12px;">✅</div>
+                    <div style="font-size: 1.25rem; font-weight: 800; color: #10B981; margin-bottom: 8px;">
+                        Account Verified Successfully
+                    </div>
+                    <div style="color: #CBD5E1; font-size: 0.90rem; line-height: 1.5; margin-bottom: 20px;">
+                        Your institutional QuantDB account is now fully active with default <strong>User</strong> permissions. You may now sign in to access the platform.
+                    </div>
                 </div>
-            </div>
-        """, unsafe_allow_html=True)
-
-        with st.form("quantdb_login_form", clear_on_submit=False):
-            username_input = st.text_input(
-                "Username or Email",
-                placeholder="e.g. admin01 or user@quantdb.local",
-                help="Enter your registered platform username or institutional email."
+            """,
+                unsafe_allow_html=True,
             )
-            password_input = st.text_input(
-                "Password",
-                type="password",
-                placeholder="••••••••••••",
-                help="Database-backed secure password authentication."
+            st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+            if st.button("Continue to Sign In", type="primary", use_container_width=True):
+                st.session_state["auth_screen"] = "signin"
+                st.rerun()
+
+        # -------------------------------------------------------------
+        # SCREEN 2: EMAIL OTP VERIFICATION SCREEN
+        # -------------------------------------------------------------
+        elif auth_mode == "verify":
+            pending = st.session_state.get("pending_verification") or {}
+            target_email = pending.get("email", "your email address")
+            target_uid = pending.get("user_id")
+
+            st.markdown(
+                f"""
+                <div style="background: #111827; border: 1px solid #1F2937; border-radius: 10px; padding: 22px 26px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);">
+                    <div style="font-size: 0.85rem; font-weight: 700; text-transform: uppercase; color: #E2E8F0; letter-spacing: 0.06em; margin-bottom: 10px; border-bottom: 1px solid #1F2937; padding-bottom: 8px;">
+                        EMAIL VERIFICATION
+                    </div>
+                    <div style="font-size: 0.85rem; color: #38BDF8; margin-bottom: 12px; font-weight: 600;">
+                        Verification code sent to your email.
+                    </div>
+                    <div style="color: #94A3B8; font-size: 0.82rem; margin-bottom: 14px; line-height: 1.4;">
+                        Enter the 6-digit OTP sent to: <strong style="color: #F8FAFC;">{target_email}</strong><br>
+                        <span style="font-size: 0.75rem; color: #F59E0B;">⏳ This OTP expires in 5 minutes.</span>
+                    </div>
+                </div>
+            """,
+                unsafe_allow_html=True,
             )
 
-            submit_btn = st.form_submit_button("LOGIN TO TERMINAL", type="primary", use_container_width=True)
+            with st.form("quantdb_otp_verify_form", clear_on_submit=False):
+                entered_otp = st.text_input(
+                    "6-Digit Verification Code",
+                    max_chars=6,
+                    placeholder="123456",
+                    help="Enter the 6-digit verification code sent to your email.",
+                )
+                verify_btn = st.form_submit_button(
+                    "VERIFY OTP", type="primary", use_container_width=True
+                )
 
-            if submit_btn:
-                success, msg = login(username_input, password_input)
-                if success:
-                    st.success(f"Access granted. Welcome back, {st.session_state.get('display_name')}!")
+                if verify_btn:
+                    if not target_uid:
+                        st.error("Verification session expired. Please start registration again.")
+                    else:
+                        v_ok, v_msg = verify_otp_code(target_uid, entered_otp)
+                        if v_ok:
+                            st.success("Account verified successfully.")
+                            st.rerun()
+                        else:
+                            st.error(v_msg)
+
+            # Resend OTP and Back Controls
+            col_resend, col_back = st.columns(2)
+            with col_resend:
+                if st.button("RESEND OTP", use_container_width=True):
+                    if target_uid or target_email:
+                        r_ok, r_msg = resend_otp_code(target_uid or target_email)
+                        if r_ok:
+                            st.success("New verification code sent!")
+                        else:
+                            st.warning(r_msg)
+                    else:
+                        st.error("No active user session to resend code.")
+
+            with col_back:
+                if st.button("← Back to Sign In", use_container_width=True):
+                    st.session_state["auth_screen"] = "signin"
+                    st.session_state["pending_verification"] = None
                     st.rerun()
-                else:
-                    st.error(f"Authentication Failed: {msg}")
+
+        # -------------------------------------------------------------
+        # SCREEN 3: TABBED SIGN IN & SIGN UP (CREATE ACCOUNT)
+        # -------------------------------------------------------------
+        else:
+            st.markdown(
+                """
+                <div style="background: #111827; border: 1px solid #1F2937; border-radius: 10px 10px 0 0; padding: 18px 24px 8px 24px;">
+                    <div style="font-size: 0.85rem; font-weight: 700; text-transform: uppercase; color: #E2E8F0; letter-spacing: 0.06em; border-bottom: 1px solid #1F2937; padding-bottom: 8px;">
+                        Access Gateway
+                    </div>
+                </div>
+            """,
+                unsafe_allow_html=True,
+            )
+
+            tab_signin, tab_signup = st.tabs(["SIGN IN", "CREATE ACCOUNT"])
+
+            with tab_signin:
+                with st.form("quantdb_login_form", clear_on_submit=False):
+                    username_input = st.text_input(
+                        "Username or Email",
+                        placeholder="e.g. admin01 or user@quantdb.local",
+                        help="Enter your registered platform username or institutional email.",
+                    )
+                    password_input = st.text_input(
+                        "Password",
+                        type="password",
+                        placeholder="••••••••••••",
+                        help="Database-backed secure password authentication.",
+                    )
+
+                    submit_btn = st.form_submit_button(
+                        "LOGIN TO TERMINAL", type="primary", use_container_width=True
+                    )
+
+                    if submit_btn:
+                        success, msg = login(username_input, password_input)
+                        if success:
+                            st.success(
+                                f"Access granted. Welcome back, {st.session_state.get('display_name')}!"
+                            )
+                            st.rerun()
+                        else:
+                            if st.session_state.get("auth_screen") == "verify":
+                                st.warning(msg)
+                                st.rerun()
+                            else:
+                                st.error(f"Authentication Failed: {msg}")
+
+            with tab_signup:
+                with st.form("quantdb_signup_form", clear_on_submit=False):
+                    reg_name = st.text_input(
+                        "Full Name",
+                        placeholder="e.g. Alan Turing",
+                        help="Your full legal or academic name.",
+                    )
+                    reg_username = st.text_input(
+                        "Username",
+                        placeholder="e.g. aturing",
+                        help="3-30 characters: letters, numbers, and underscores only.",
+                    )
+                    reg_email = st.text_input(
+                        "Email Address",
+                        placeholder="e.g. aturing@cambridge.edu",
+                        help="A valid email address where you will receive a 6-digit verification code.",
+                    )
+                    reg_password = st.text_input(
+                        "Password",
+                        type="password",
+                        placeholder="••••••••••••",
+                        help="Minimum 8 characters with both letters and numbers.",
+                    )
+                    reg_confirm_password = st.text_input(
+                        "Confirm Password",
+                        type="password",
+                        placeholder="••••••••••••",
+                        help="Re-enter your password to confirm.",
+                    )
+                    reg_phone = st.text_input(
+                        "Mobile Number (Optional)",
+                        placeholder="e.g. +1 555-0199",
+                        help="Optional mobile phone number for account alerts.",
+                    )
+
+                    st.markdown(
+                        """
+                        <div style="font-size: 0.72rem; color: #94A3B8; margin-top: 4px; margin-bottom: 12px; background: #0F172A; padding: 6px 10px; border-radius: 4px; border-left: 3px solid #06B6D4;">
+                            ℹ️ <strong>ROLE POLICY:</strong> Public registration assigns default <strong>User</strong> permissions.
+                            Privileged roles (Admin, Quant Trader, Quant Researcher) require institutional authorization from the Platform Administrator.
+                        </div>
+                    """,
+                        unsafe_allow_html=True,
+                    )
+
+                    signup_btn = st.form_submit_button(
+                        "CREATE ACCOUNT", type="primary", use_container_width=True
+                    )
+
+                    if signup_btn:
+                        s_ok, s_msg = signup(
+                            name=reg_name,
+                            username=reg_username,
+                            email=reg_email,
+                            password=reg_password,
+                            confirm_password=reg_confirm_password,
+                            phone=reg_phone,
+                        )
+                        if s_ok:
+                            st.success(s_msg)
+                            st.rerun()
+                        else:
+                            st.error(s_msg)
 
         # Demo Credentials Helper for Academic Evaluation
-        with st.expander("🔑 Academic Demo Accounts (Click to view test credentials)", expanded=False):
-            st.markdown("""
+        with st.expander(
+            "🔑 Academic Demo Accounts (Click to view test credentials)", expanded=False
+        ):
+            st.markdown(
+                """
                 <div style="font-size: 0.78rem; color: #94A3B8; margin-bottom: 8px;">
                     Pre-configured demonstration accounts representing all four platform roles:
                 </div>
-            """, unsafe_allow_html=True)
+            """,
+                unsafe_allow_html=True,
+            )
 
             demo_rows = [
-                ("Admin", "admin01", "Admin01@QuantDB", "Full platform governance & simulation"),
-                ("Quant Researcher", "researcher01", "Researcher01@QuantDB", "Backtesting, strategies, research analytics"),
-                ("Quant Trader", "trader01", "Trader01@QuantDB", "Simulated paper trading & order tickets"),
-                ("Standard User", "user01", "User01@QuantDB", "Market data, portfolio overview & reports"),
+                (
+                    "Admin",
+                    "admin01",
+                    "Admin01@QuantDB",
+                    "Full platform governance & simulation",
+                ),
+                (
+                    "Quant Researcher",
+                    "researcher01",
+                    "Researcher01@QuantDB",
+                    "Backtesting, strategies, research analytics",
+                ),
+                (
+                    "Quant Trader",
+                    "trader01",
+                    "Trader01@QuantDB",
+                    "Simulated paper trading & order tickets",
+                ),
+                (
+                    "Standard User",
+                    "user01",
+                    "User01@QuantDB",
+                    "Market data, portfolio overview & reports",
+                ),
             ]
 
             for role_lbl, u_val, p_val, desc in demo_rows:
-                st.markdown(f"""
+                st.markdown(
+                    f"""
                     <div style="border-left: 3px solid #06B6D4; padding: 4px 10px; margin-bottom: 8px; background: #0F172A;">
                         <strong style="color: #38BDF8;">{role_lbl}</strong><br>
                         <span style="font-size: 0.75rem; color: #CBD5E1; font-family: 'JetBrains Mono', monospace;">
@@ -293,7 +612,9 @@ def render_login_screen() -> None:
                         </span>
                         <div style="font-size: 0.70rem; color: #64748B;">{desc}</div>
                     </div>
-                """, unsafe_allow_html=True)
+                """,
+                    unsafe_allow_html=True,
+                )
 
 
 def require_auth(current_page: str = "Overview") -> bool:

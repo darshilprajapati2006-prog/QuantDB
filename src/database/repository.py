@@ -81,6 +81,24 @@ class Repository:
         finally:
             conn.close()
 
+    def update_user_verified(self, user_id: int, is_verified: bool = True):
+        conn = self._get_connection()
+        try:
+            return queries.update_user_verified(conn, user_id, is_verified)
+        finally:
+            conn.close()
+
+    def update_unverified_user(
+        self, user_id: int, name: str, username: str, password_hash: str
+    ):
+        conn = self._get_connection()
+        try:
+            return queries.update_unverified_user(
+                conn, user_id, name, username, password_hash
+            )
+        finally:
+            conn.close()
+
     def create_user(
         self,
         username: str,
@@ -89,12 +107,59 @@ class Repository:
         password_hash: str,
         role: str,
         status: str = "ACTIVE",
+        is_verified: bool = False,
     ):
         conn = self._get_connection()
         try:
             return queries.create_user(
-                conn, username, name, email, password_hash, role, status
+                conn, username, name, email, password_hash, role, status, is_verified
             )
+        finally:
+            conn.close()
+
+    def insert_email_otp(
+        self,
+        user_id: int,
+        otp_hash: str,
+        purpose: str = "REGISTRATION",
+        expires_at: Optional[str] = None,
+        max_attempts: int = 5,
+    ):
+        conn = self._get_connection()
+        try:
+            return queries.insert_email_otp(
+                conn, user_id, otp_hash, purpose, expires_at, max_attempts
+            )
+        finally:
+            conn.close()
+
+    def get_latest_otp_for_user(
+        self, user_id: int, purpose: str = "REGISTRATION"
+    ):
+        conn = self._get_connection()
+        try:
+            return queries.get_latest_otp_for_user(conn, user_id, purpose)
+        finally:
+            conn.close()
+
+    def increment_otp_attempts(self, otp_id: int):
+        conn = self._get_connection()
+        try:
+            return queries.increment_otp_attempts(conn, otp_id)
+        finally:
+            conn.close()
+
+    def mark_otp_verified(self, otp_id: int):
+        conn = self._get_connection()
+        try:
+            return queries.mark_otp_verified(conn, otp_id)
+        finally:
+            conn.close()
+
+    def invalidate_user_otps(self, user_id: int, purpose: str = "REGISTRATION"):
+        conn = self._get_connection()
+        try:
+            return queries.invalidate_user_otps(conn, user_id, purpose)
         finally:
             conn.close()
 

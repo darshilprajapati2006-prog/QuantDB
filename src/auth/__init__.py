@@ -2,6 +2,8 @@
 QuantDB Authentication & Authorization Package.
 """
 
+from src.auth.email_service import send_otp_email, set_test_email_sender
+from src.auth.otp import generate_otp, hash_otp, verify_otp_hash
 from src.auth.password import hash_password, verify_password
 from src.auth.roles import (
     Role,
@@ -19,8 +21,19 @@ from src.auth.roles import (
 from src.auth.service import (
     AuthenticationError,
     AccountInactiveError,
+    UnverifiedEmailError,
     AuthorizationError,
+    RegistrationError,
+    OTPError,
+    OTPExpiredError,
+    OTPCooldownError,
+    OTPVerificationError,
     authenticate_user,
+    register_user,
+    verify_registration_otp,
+    resend_registration_otp,
+    validate_registration_data,
+    validate_password_strength,
     get_user_role,
     has_permission,
     require_role,
@@ -42,8 +55,24 @@ __all__ = [
     "can_manage_users",
     "AuthenticationError",
     "AccountInactiveError",
+    "UnverifiedEmailError",
     "AuthorizationError",
+    "RegistrationError",
+    "OTPError",
+    "OTPExpiredError",
+    "OTPCooldownError",
+    "OTPVerificationError",
     "authenticate_user",
+    "register_user",
+    "verify_registration_otp",
+    "resend_registration_otp",
+    "validate_registration_data",
+    "validate_password_strength",
+    "generate_otp",
+    "hash_otp",
+    "verify_otp_hash",
+    "send_otp_email",
+    "set_test_email_sender",
     "get_user_role",
     "has_permission",
     "require_role",
