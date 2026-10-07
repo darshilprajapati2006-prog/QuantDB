@@ -1,6 +1,7 @@
 """
 QuantDB Persistent Terminal Sidebar.
-Provides unified navigation, branding, quick data mode switcher, and live system status.
+Provides unified navigation, branding, authenticated user badge, RBAC navigation filtering,
+quick data mode switcher, and live system status.
 Seamlessly routes across pages with st.switch_page.
 """
 
@@ -8,8 +9,10 @@ from typing import Optional
 import streamlit as st
 from dashboard.components.status import render_sidebar_status
 from dashboard.providers.factory import get_current_data_mode, set_data_mode
+from src.auth.roles import get_allowed_pages, normalize_role, Role
+from dashboard.services.auth_service import is_authenticated, get_current_user, logout
 
-NAV_PAGES = [
+ALL_NAV_PAGES = [
     "Overview",
     "Market Data",
     "Trading",
@@ -46,7 +49,7 @@ PAGE_ROUTES = {
 def render_sidebar(current_page: str = "Overview") -> str:
     """
     Renders the QuantDB persistent terminal sidebar on every page.
-    Automatically handles switching between pages when a user selects a different view.
+    Filters navigation options dynamically based on the authenticated user's RBAC role.
     """
     with st.sidebar:
         # QuantDB Terminal Branding Header
@@ -62,14 +65,44 @@ def render_sidebar(current_page: str = "Overview") -> str:
             </div>
         """, unsafe_allow_html=True)
 
-        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
 
-        # Radio navigation selector
-        curr_idx = NAV_PAGES.index(current_page) if current_page in NAV_PAGES else 0
+        # Authenticated User Badge & Logout
+        if is_authenticated():
+            curr_user = get_current_user() or {}
+            display_name = curr_user.get("display_name") or curr_user.get("username") or "User"
+            role_display = curr_user.get("role_display") or "User"
+            role = curr_user.get("role") or Role.USER
+
+            st.markdown(f"""
+                <div style="padding: 10px 12px; background: #111827; border: 1px solid #1F2937; border-radius: 6px; margin-bottom: 10px;">
+                    <div style="font-size: 0.65rem; text-transform: uppercase; color: #64748B; font-weight: 700; letter-spacing: 0.06em;">Logged in as:</div>
+                    <div style="font-size: 0.88rem; font-weight: 700; color: #F8FAFC; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{display_name}</div>
+                    <div style="font-size: 0.65rem; text-transform: uppercase; color: #64748B; font-weight: 700; letter-spacing: 0.06em; margin-top: 5px;">Role:</div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 1px;">
+                        <span style="font-size: 0.78rem; font-weight: 600; color: #38BDF8; font-family: 'JetBrains Mono', monospace;">{role_display}</span>
+                        <span style="font-size: 0.62rem; color: #10B981; background: rgba(16, 185, 129, 0.12); padding: 1px 5px; border-radius: 3px; border: 1px solid rgba(16, 185, 129, 0.25);">ACTIVE</span>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+
+            if st.button("Logout", key="btn_auth_logout", use_container_width=True, type="secondary"):
+                logout()
+                st.rerun()
+
+            # Filter visible navigation pages strictly to those permitted for this role
+            nav_pages = get_allowed_pages(role)
+        else:
+            nav_pages = ALL_NAV_PAGES
+
+        st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+
+        # Radio navigation selector with RBAC-filtered items
+        curr_idx = nav_pages.index(current_page) if current_page in nav_pages else 0
 
         selected = st.radio(
             "Terminal Navigation",
-            options=NAV_PAGES,
+            options=nav_pages,
             index=curr_idx,
             format_func=lambda x: f"{PAGE_ICONS.get(x, '•')}  {x}",
             label_visibility="collapsed",

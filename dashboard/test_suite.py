@@ -117,6 +117,33 @@ def run_all_tests():
     assert isinstance(real_df, type(df_mkt)), "Real provider should return DataFrame safely without crashing"
     print("[PASS] Real Provider fault-tolerance verified: Handled offline backend gracefully without exceptions")
 
+    # 9. Authentication & RBAC Contract Verification
+    from dashboard.services import auth_service
+    from src.auth.roles import Role
+
+    # Login as Admin
+    ok_admin, msg_admin = auth_service.login("admin01", "Admin01@QuantDB")
+    assert ok_admin, f"Admin login failed: {msg_admin}"
+    assert auth_service.is_authenticated() is True, "Session should be authenticated"
+    assert auth_service.get_current_role() == Role.ADMIN, "Role should be ADMIN"
+    assert auth_service.check_page_access("Admin") is True, "Admin must have access to Admin module"
+    assert auth_service.check_page_access("Trading") is True, "Admin must have access to Trading module"
+    
+    # Login as Standard User
+    ok_user, msg_user = auth_service.login("user01", "User01@QuantDB")
+    assert ok_user, f"User login failed: {msg_user}"
+    assert auth_service.get_current_role() == Role.USER, "Role should be USER"
+    assert auth_service.check_page_access("Overview") is True, "User must have access to Overview"
+    assert auth_service.check_page_access("Market Data") is True, "User must have access to Market Data"
+    assert auth_service.check_page_access("Trading") is False, "User must be restricted from Trading"
+    assert auth_service.check_page_access("Admin") is False, "User must be restricted from Admin"
+    assert auth_service.check_page_access("Backtesting") is False, "User must be restricted from Backtesting"
+
+    # Logout
+    auth_service.logout()
+    assert auth_service.is_authenticated() is False, "Session should be logged out"
+    print("[PASS] Authentication & RBAC Access Control verified: 4 Roles & Page Guards")
+
     # Reset to mock mode
     set_data_mode("mock")
 

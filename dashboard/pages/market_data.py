@@ -28,6 +28,8 @@ from dashboard.services.market_service import (
     get_historical_market_data,
 )
 
+from dashboard.services.auth_service import require_auth
+
 # Page configuration
 st.set_page_config(
     page_title="QuantDB — Market Data Research",
@@ -36,8 +38,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Apply unified design system and sidebar
+# Apply unified design system and authentication guard
 apply_terminal_theme()
+require_auth("Market Data")
 render_sidebar(current_page="Market Data")
 
 # Top Disclaimer

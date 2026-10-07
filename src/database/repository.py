@@ -32,10 +32,69 @@ class Repository:
         finally:
             conn.close()
 
+    def get_user_by_email(self, email: str):
+        conn = self._get_connection()
+        try:
+            return queries.get_user_by_email(conn, email)
+        finally:
+            conn.close()
+
+    def get_user_by_username(self, username: str):
+        conn = self._get_connection()
+        try:
+            return queries.get_user_by_username(conn, username)
+        finally:
+            conn.close()
+
+    def get_user_by_identifier(self, identifier: str):
+        conn = self._get_connection()
+        try:
+            return queries.get_user_by_identifier(conn, identifier)
+        finally:
+            conn.close()
+
     def get_users(self):
         conn = self._get_connection()
         try:
             return queries.get_all_users(conn)
+        finally:
+            conn.close()
+
+    def update_user_role(self, user_id: int, role: str):
+        conn = self._get_connection()
+        try:
+            return queries.update_user_role(conn, user_id, role)
+        finally:
+            conn.close()
+
+    def update_user_status(self, user_id: int, status: str):
+        conn = self._get_connection()
+        try:
+            return queries.update_user_status(conn, user_id, status)
+        finally:
+            conn.close()
+
+    def update_user_password(self, user_id: int, password_hash: str):
+        conn = self._get_connection()
+        try:
+            return queries.update_user_password(conn, user_id, password_hash)
+        finally:
+            conn.close()
+
+    def create_user(
+        self,
+        username: str,
+        name: str,
+        email: str,
+        password_hash: str,
+        role: str,
+        status: str = "ACTIVE",
+    ):
+        conn = self._get_connection()
+        try:
+            return queries.create_user(
+                conn, username, name, email, password_hash, role, status
+            )
         finally:
             conn.close()
 

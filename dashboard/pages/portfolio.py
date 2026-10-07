@@ -34,6 +34,8 @@ from dashboard.services.portfolio_service import (
     get_portfolio_equity_history,
 )
 
+from dashboard.services.auth_service import require_auth
+
 # Page configuration
 st.set_page_config(
     page_title="QuantDB — Portfolio Analytics",
@@ -42,8 +44,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Apply unified design system and sidebar
+# Apply unified design system and authentication guard
 apply_terminal_theme()
+require_auth("Portfolio")
 render_sidebar(current_page="Portfolio")
 
 # Top Disclaimer

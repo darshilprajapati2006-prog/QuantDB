@@ -66,7 +66,7 @@ Quant Analytics & Backtesting Engine (src/analytics/*, src/backtesting/*)
 
 The platform is backed by a 3NF normalized MySQL database with 12 core relational entities:
 
-1. **`users`**: Platform user accounts, encrypted credentials, RBAC roles (`ADMIN`, `QUANT_RESEARCHER`, `SIMULATED_TRADER`), and account status.
+1. **`users`**: Platform user accounts, unique usernames, PBKDF2-HMAC-SHA256 password credentials, RBAC roles (`ADMIN`, `QUANT_RESEARCHER`, `QUANT_TRADER`, `USER`), and account status.
 2. **`exchanges`**: Global stock exchange master records (`NSE`, `BSE`, `NASDAQ`, `NYSE`), countries, and timezone definitions.
 3. **`securities`**: Financial instruments master catalog with foreign keys to exchanges, security types (`EQUITY`, `ETF`), and currencies.
 4. **`market_data`**: Historical market data records (OHLCV, bid, ask, volume) with timestamp indexing and foreign key referencing securities.
@@ -95,6 +95,7 @@ All database scripts are located under `database/` and must be executed in exact
 09_functions.sql          → Stored functions (fn_win_rate, fn_position_value, fn_backtest_profit_pct).
 10_triggers.sql           → Database triggers for automated cash updates, trade matching, and price validation.
 11_transactions.sql       → ACID transaction procedures with row locking (FOR UPDATE) and SAVEPOINT rollbacks.
+12_authentication.sql     → Authentication, PBKDF2 credentials, and Role-Based Access Control (RBAC) migration.
 ```
 
 ---

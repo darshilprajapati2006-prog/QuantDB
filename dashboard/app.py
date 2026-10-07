@@ -36,6 +36,7 @@ from dashboard.services.trading_service import get_orders, get_trades
 from dashboard.services.backtest_service import get_latest_summary
 from dashboard.services.strategy_service import get_strategies
 from dashboard.services.analytics_service import get_portfolio_risk_metrics, get_system_health
+from dashboard.services.auth_service import require_auth
 
 # Page configuration
 st.set_page_config(
@@ -45,8 +46,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Apply unified design system and sidebar
+# Apply unified design system and authentication guard
 apply_terminal_theme()
+require_auth("Overview")
 render_sidebar(current_page="Overview")
 
 # Top Disclaimer / Banner
