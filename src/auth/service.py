@@ -237,16 +237,25 @@ def authenticate_user(
     raw_role = user.get("role", Role.USER)
     canonical_role = normalize_role(raw_role)
 
+    # Synthetic username for UI and backward compatibility (mapped to email/name when column is absent)
+    synthetic_username = (
+        user.get("username")
+        or (clean_id if "@" not in clean_id else "")
+        or (user.get("email", "").split("@")[0] if user.get("email") else "")
+        or user.get("name")
+        or clean_id
+    )
+
     # Return safe user profile for session state (strictly omitting credentials)
     return {
         "user_id": user["user_id"],
-        "username": user.get("username") or clean_id,
+        "username": synthetic_username,
         "name": user.get("name") or clean_id,
         "email": user.get("email") or "",
         "role": canonical_role,
         "role_display": get_role_display_name(canonical_role),
         "status": status,
-        "is_verified": True,
+        "is_verified": bool(user.get("is_verified", True)),
         "created_at": str(user.get("created_at", "")),
     }
 
@@ -367,14 +376,17 @@ def register_user(
 
     # Step 3: Check for existing accounts
     try:
-        existing_by_uname = repo.get_user_by_username(clean_username)
+        existing_by_uname = repo.get_user_by_username(clean_username) if clean_username else None
         existing_by_email = repo.get_user_by_email(clean_email)
     except Exception as e:
         logger.error(f"Database error during registration lookup: {e}")
         raise RegistrationError(f"Registration database error: {e}")
 
-    if existing_by_uname and existing_by_uname.get("is_verified"):
-        raise RegistrationError("Username is already taken. Please choose another.")
+    # Check for username collision (in mocks/environments where distinct username is provided)
+    if existing_by_uname and existing_by_uname.get("is_verified") and existing_by_uname.get("email") != clean_email:
+        # Only block if it is explicitly a different user's verified account
+        if existing_by_uname.get("username", "").lower() == clean_username.lower():
+            raise RegistrationError("Username is already taken. Please choose another.")
     if existing_by_email and existing_by_email.get("is_verified"):
         raise RegistrationError("An account with this email address already exists.")
 
@@ -382,15 +394,7 @@ def register_user(
 
     # Step 4: Handle pending unverified accounts or create new account
     try:
-        if existing_by_uname and not existing_by_uname.get("is_verified"):
-            user_id = existing_by_uname["user_id"]
-            repo.update_unverified_user(
-                user_id=user_id,
-                name=clean_name,
-                username=clean_username,
-                password_hash=pwd_hash,
-            )
-        elif existing_by_email and not existing_by_email.get("is_verified"):
+        if existing_by_email and not existing_by_email.get("is_verified"):
             user_id = existing_by_email["user_id"]
             repo.update_unverified_user(
                 user_id=user_id,
@@ -398,15 +402,23 @@ def register_user(
                 username=clean_username,
                 password_hash=pwd_hash,
             )
-        else:
-            # Create fresh unverified record
-            user_id = repo.create_user(
+        elif existing_by_uname and not existing_by_uname.get("is_verified"):
+            user_id = existing_by_uname["user_id"]
+            repo.update_unverified_user(
+                user_id=user_id,
+                name=clean_name,
                 username=clean_username,
+                password_hash=pwd_hash,
+            )
+        else:
+            # Create fresh record strictly adhering to actual QuantDB schema contract
+            user_id = repo.create_user(
                 name=clean_name,
                 email=clean_email,
                 password_hash=pwd_hash,
                 role=target_role,
                 status="ACTIVE",
+                username=clean_username,
                 is_verified=False,
             )
     except Exception as e:

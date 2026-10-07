@@ -204,7 +204,7 @@ def repo():
     return InMemoryRepository()
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def captured_emails():
     emails = []
 

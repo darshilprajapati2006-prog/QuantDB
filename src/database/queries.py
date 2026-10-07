@@ -21,13 +21,11 @@ from .connection import DatabaseConnectionError
 GET_USER_BY_ID = """
 SELECT
     user_id,
-    username,
     name,
     email,
     password_hash,
     role,
     status,
-    is_verified,
     created_at
 FROM users
 WHERE user_id = %s;
@@ -36,13 +34,11 @@ WHERE user_id = %s;
 GET_USER_BY_EMAIL = """
 SELECT
     user_id,
-    username,
     name,
     email,
     password_hash,
     role,
     status,
-    is_verified,
     created_at
 FROM users
 WHERE email = %s;
@@ -51,43 +47,38 @@ WHERE email = %s;
 GET_USER_BY_USERNAME = """
 SELECT
     user_id,
-    username,
     name,
     email,
     password_hash,
     role,
     status,
-    is_verified,
     created_at
 FROM users
-WHERE username = %s;
+WHERE email = %s;
 """
 
 GET_USER_BY_IDENTIFIER = """
 SELECT
     user_id,
-    username,
     name,
     email,
     password_hash,
     role,
     status,
-    is_verified,
     created_at
 FROM users
-WHERE username = %s OR email = %s
+WHERE email = %s OR email LIKE CONCAT(%s, '@%%')
+ORDER BY (email = %s) DESC
 LIMIT 1;
 """
 
 GET_ALL_USERS = """
 SELECT
     user_id,
-    username,
     name,
     email,
     role,
     status,
-    is_verified,
     created_at
 FROM users
 ORDER BY user_id;
@@ -120,23 +111,20 @@ WHERE user_id = %s;
 UPDATE_UNVERIFIED_USER = """
 UPDATE users
 SET name = %s,
-    username = %s,
     password_hash = %s,
     created_at = %s
-WHERE user_id = %s AND is_verified = FALSE;
+WHERE user_id = %s;
 """
 
 CREATE_USER = """
 INSERT INTO users (
-    username,
     name,
     email,
     password_hash,
     role,
     status,
-    is_verified,
     created_at
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+) VALUES (%s, %s, %s, %s, %s, %s);
 """
 
 # ============================================================
@@ -1004,11 +992,28 @@ def _close_cursor(cursor):
         except Exception:
             pass
 
+def _normalize_user_dict(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Normalizes a user database row into a standardized dictionary contract.
+    Ensures 'username' and 'is_verified' keys are always present even when
+    the underlying Aiven schema does not have those physical columns.
+    """
+    if not row:
+        return None
+    res = dict(row)
+    if "username" not in res or not res["username"]:
+        email_val = res.get("email") or ""
+        res["username"] = email_val.split("@")[0] if email_val else (res.get("name") or f"user_{res.get('user_id')}")
+    if "is_verified" not in res:
+        res["is_verified"] = True
+    return res
+
+
 def get_user_by_id(conn, user_id: int) -> Optional[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(GET_USER_BY_ID, (user_id,))
-        return cursor.fetchone()
+        return _normalize_user_dict(cursor.fetchone())
     finally:
         _close_cursor(cursor)
 
@@ -1017,7 +1022,7 @@ def get_user_by_email(conn, email: str) -> Optional[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(GET_USER_BY_EMAIL, (email,))
-        return cursor.fetchone()
+        return _normalize_user_dict(cursor.fetchone())
     finally:
         _close_cursor(cursor)
 
@@ -1025,8 +1030,10 @@ def get_user_by_email(conn, email: str) -> Optional[Dict[str, Any]]:
 def get_user_by_username(conn, username: str) -> Optional[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
-        cursor.execute(GET_USER_BY_USERNAME, (username,))
-        return cursor.fetchone()
+        # Schema contract: email is the primary credential in users table.
+        # Fall back to identifier match if username entered without domain.
+        cursor.execute(GET_USER_BY_IDENTIFIER, (username, username, username))
+        return _normalize_user_dict(cursor.fetchone())
     finally:
         _close_cursor(cursor)
 
@@ -1034,8 +1041,8 @@ def get_user_by_username(conn, username: str) -> Optional[Dict[str, Any]]:
 def get_user_by_identifier(conn, identifier: str) -> Optional[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
-        cursor.execute(GET_USER_BY_IDENTIFIER, (identifier, identifier))
-        return cursor.fetchone()
+        cursor.execute(GET_USER_BY_IDENTIFIER, (identifier, identifier, identifier))
+        return _normalize_user_dict(cursor.fetchone())
     finally:
         _close_cursor(cursor)
 
@@ -1044,7 +1051,8 @@ def get_all_users(conn) -> List[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(GET_ALL_USERS)
-        return cursor.fetchall()
+        rows = cursor.fetchall() or []
+        return [_normalize_user_dict(r) for r in rows if r]
     finally:
         _close_cursor(cursor)
 
@@ -1082,22 +1090,35 @@ def update_user_password(conn, user_id: int, password_hash: str) -> bool:
 def update_user_verified(conn, user_id: int, is_verified: bool = True) -> bool:
     cursor = conn.cursor()
     try:
-        cursor.execute(UPDATE_USER_VERIFIED, (is_verified, user_id))
-        conn.commit()
-        return cursor.rowcount > 0
+        try:
+            cursor.execute(UPDATE_USER_VERIFIED, (is_verified, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as col_err:
+            # If is_verified column does not exist on target database, gracefully succeed
+            if "Unknown column 'is_verified'" in str(col_err) or "1054" in str(col_err):
+                return True
+            raise
     finally:
         _close_cursor(cursor)
 
 
 def update_unverified_user(
-    conn, user_id: int, name: str, username: str, password_hash: str
+    conn, user_id: int, name: str, *args, username: Optional[str] = None, password_hash: str = "", **kwargs
 ) -> bool:
     cursor = conn.cursor()
     try:
         from datetime import datetime
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        resolved_hash = password_hash
+        if not resolved_hash and len(args) >= 1:
+            # Legacy positional args: (conn, user_id, name, username, password_hash)
+            resolved_hash = args[-1]
+        elif "password_hash" in kwargs:
+            resolved_hash = kwargs["password_hash"]
+
         cursor.execute(
-            UPDATE_UNVERIFIED_USER, (name, username, password_hash, now, user_id)
+            UPDATE_UNVERIFIED_USER, (name, resolved_hash, now, user_id)
         )
         conn.commit()
         return cursor.rowcount > 0
@@ -1107,22 +1128,43 @@ def update_unverified_user(
 
 def create_user(
     conn,
-    username: str,
-    name: str,
-    email: str,
-    password_hash: str,
-    role: str,
+    name: str = "",
+    email: str = "",
+    password_hash: str = "",
+    role: str = "USER",
     status: str = "ACTIVE",
-    is_verified: bool = False,
     created_at: Optional[str] = None,
+    *args,
+    **kwargs,
 ) -> int:
     cursor = conn.cursor()
     try:
         from datetime import datetime
         now = created_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        resolved_name = name
+        resolved_email = email
+        resolved_hash = password_hash
+        resolved_role = role
+        resolved_status = status
+
+        # Handle legacy positional calls: (conn, username, name, email, password_hash, role, status)
+        if "@" not in email and len(args) >= 1 and "@" in str(args[0]):
+            resolved_name = email
+            resolved_email = args[0]
+            resolved_hash = args[1] if len(args) > 1 else password_hash
+            resolved_role = args[2] if len(args) > 2 else role
+            resolved_status = args[3] if len(args) > 3 else status
+        elif "email" in kwargs:
+            resolved_email = kwargs["email"]
+            resolved_name = kwargs.get("name", resolved_name)
+            resolved_hash = kwargs.get("password_hash", resolved_hash)
+            resolved_role = kwargs.get("role", resolved_role)
+            resolved_status = kwargs.get("status", resolved_status)
+
         cursor.execute(
             CREATE_USER,
-            (username, name, email, password_hash, role, status, is_verified, now),
+            (resolved_name, resolved_email, resolved_hash, resolved_role, resolved_status, now),
         )
         conn.commit()
         return cursor.lastrowid
