@@ -49,10 +49,10 @@ class MockProvider:
 
     def get_users(self) -> List[Dict]:
         return [
-            {"user_id": 1, "name": "Darshil Prajapati", "email": "darshil@quantdb.local", "role": "ADMIN", "status": "ACTIVE", "created_at": "2024-01-01 00:00:00"},
-            {"user_id": 2, "name": "Bharat", "email": "bharat@quantdb.local", "role": "QUANT_RESEARCHER", "status": "ACTIVE", "created_at": "2024-01-05 10:15:00"},
-            {"user_id": 3, "name": "Sriteja", "email": "sriteja@quantdb.local", "role": "ADMIN", "status": "ACTIVE", "created_at": "2024-01-10 11:30:00"},
-            {"user_id": 4, "name": "Simulated Trader 1", "email": "trader1@quantdb.local", "role": "SIMULATED_TRADER", "status": "ACTIVE", "created_at": "2024-02-01 09:00:00"},
+            {"user_id": 1, "username": "admin01", "name": "Darshil Prajapati", "email": "darshil@quantdb.local", "role": "ADMIN", "status": "ACTIVE", "created_at": "2024-01-01 00:00:00"},
+            {"user_id": 2, "username": "researcher01", "name": "Bharat", "email": "bharat@quantdb.local", "role": "QUANT_RESEARCHER", "status": "ACTIVE", "created_at": "2024-01-05 10:15:00"},
+            {"user_id": 3, "username": "trader01", "name": "Simulated Trader 1", "email": "trader1@quantdb.local", "role": "QUANT_TRADER", "status": "ACTIVE", "created_at": "2024-02-01 09:00:00"},
+            {"user_id": 4, "username": "user01", "name": "Standard User", "email": "user01@quantdb.local", "role": "USER", "status": "ACTIVE", "created_at": "2024-02-15 11:30:00"},
         ]
 
     def get_exchanges(self) -> List[Dict]:

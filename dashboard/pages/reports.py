@@ -38,6 +38,8 @@ from dashboard.services.analytics_service import get_portfolio_risk_metrics
 from dashboard.services.trading_service import get_orders, get_trades
 from dashboard.services.market_service import get_market_overview
 
+from dashboard.services.auth_service import require_auth
+
 # Page configuration
 st.set_page_config(
     page_title="QuantDB — Analytics & Reports",
@@ -46,8 +48,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Apply unified design system and sidebar
+# Apply unified design system and authentication guard
 apply_terminal_theme()
+require_auth("Reports")
 render_sidebar(current_page="Reports")
 
 # Top Disclaimer

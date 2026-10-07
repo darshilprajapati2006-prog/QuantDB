@@ -5,12 +5,15 @@ USE QuantDB;
 
 CREATE TABLE IF NOT EXISTS users (
     user_id BIGINT AUTO_INCREMENT,
+    username VARCHAR(50) NULL,
     name VARCHAR(100) NOT NULL,
     email VARCHAR(150) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     role ENUM(
-        'ADMIN',
+        'USER',
+        'QUANT_TRADER',
         'QUANT_RESEARCHER',
+        'ADMIN',
         'SIMULATED_TRADER'
     ) NOT NULL,
     status ENUM(
@@ -21,7 +24,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at DATETIME NOT NULL,
 
     PRIMARY KEY (user_id),
-    UNIQUE (email)
+    UNIQUE (email),
+    UNIQUE (username)
 );
 
 

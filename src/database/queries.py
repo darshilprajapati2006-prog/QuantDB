@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 GET_USER_BY_ID = """
 SELECT
     user_id,
+    username,
     name,
     email,
     password_hash,
@@ -33,6 +34,7 @@ WHERE user_id = %s;
 GET_USER_BY_EMAIL = """
 SELECT
     user_id,
+    username,
     name,
     email,
     password_hash,
@@ -43,9 +45,39 @@ FROM users
 WHERE email = %s;
 """
 
+GET_USER_BY_USERNAME = """
+SELECT
+    user_id,
+    username,
+    name,
+    email,
+    password_hash,
+    role,
+    status,
+    created_at
+FROM users
+WHERE username = %s;
+"""
+
+GET_USER_BY_IDENTIFIER = """
+SELECT
+    user_id,
+    username,
+    name,
+    email,
+    password_hash,
+    role,
+    status,
+    created_at
+FROM users
+WHERE username = %s OR email = %s
+LIMIT 1;
+"""
+
 GET_ALL_USERS = """
 SELECT
     user_id,
+    username,
     name,
     email,
     role,
@@ -53,6 +85,36 @@ SELECT
     created_at
 FROM users
 ORDER BY user_id;
+"""
+
+UPDATE_USER_ROLE = """
+UPDATE users
+SET role = %s
+WHERE user_id = %s;
+"""
+
+UPDATE_USER_STATUS = """
+UPDATE users
+SET status = %s
+WHERE user_id = %s;
+"""
+
+UPDATE_USER_PASSWORD_HASH = """
+UPDATE users
+SET password_hash = %s
+WHERE user_id = %s;
+"""
+
+CREATE_USER = """
+INSERT INTO users (
+    username,
+    name,
+    email,
+    password_hash,
+    role,
+    status,
+    created_at
+) VALUES (%s, %s, %s, %s, %s, %s, %s);
 """
 
 
@@ -864,11 +926,92 @@ def get_user_by_id(conn, user_id: int) -> Optional[Dict[str, Any]]:
         cursor.close()
 
 
+def get_user_by_email(conn, email: str) -> Optional[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_USER_BY_EMAIL, (email,))
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+
+
+def get_user_by_username(conn, username: str) -> Optional[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_USER_BY_USERNAME, (username,))
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+
+
+def get_user_by_identifier(conn, identifier: str) -> Optional[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_USER_BY_IDENTIFIER, (identifier, identifier))
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+
+
 def get_all_users(conn) -> List[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(GET_ALL_USERS)
         return cursor.fetchall()
+    finally:
+        cursor.close()
+
+
+def update_user_role(conn, user_id: int, role: str) -> bool:
+    cursor = conn.cursor()
+    try:
+        cursor.execute(UPDATE_USER_ROLE, (role, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        cursor.close()
+
+
+def update_user_status(conn, user_id: int, status: str) -> bool:
+    cursor = conn.cursor()
+    try:
+        cursor.execute(UPDATE_USER_STATUS, (status, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        cursor.close()
+
+
+def update_user_password(conn, user_id: int, password_hash: str) -> bool:
+    cursor = conn.cursor()
+    try:
+        cursor.execute(UPDATE_USER_PASSWORD_HASH, (password_hash, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        cursor.close()
+
+
+def create_user(
+    conn,
+    username: str,
+    name: str,
+    email: str,
+    password_hash: str,
+    role: str,
+    status: str = "ACTIVE",
+    created_at: Optional[str] = None,
+) -> int:
+    cursor = conn.cursor()
+    try:
+        from datetime import datetime
+        now = created_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            CREATE_USER,
+            (username, name, email, password_hash, role, status, now),
+        )
+        conn.commit()
+        return cursor.lastrowid
     finally:
         cursor.close()
 

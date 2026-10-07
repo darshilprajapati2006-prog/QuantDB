@@ -31,6 +31,8 @@ from dashboard.services.trading_service import (
     submit_simulated_order,
 )
 
+from dashboard.services.auth_service import require_auth
+
 # Page configuration
 st.set_page_config(
     page_title="QuantDB — Simulated Trading",
@@ -39,8 +41,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Apply unified design system and sidebar
+# Apply unified design system and authentication guard
 apply_terminal_theme()
+require_auth("Trading")
 render_sidebar(current_page="Trading")
 
 # Mandatory Simulation Banner

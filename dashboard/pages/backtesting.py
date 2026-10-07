@@ -32,6 +32,8 @@ from dashboard.services.strategy_service import get_strategies, get_strategy_by_
 from dashboard.services.market_service import get_available_securities
 from dashboard.services.backtest_service import execute_backtest
 
+from dashboard.services.auth_service import require_auth
+
 # Page configuration
 st.set_page_config(
     page_title="QuantDB — Strategy Backtesting",
@@ -40,8 +42,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Apply unified design system and sidebar
+# Apply unified design system and authentication guard
 apply_terminal_theme()
+require_auth("Backtesting")
 render_sidebar(current_page="Backtesting")
 
 # Top Disclaimer

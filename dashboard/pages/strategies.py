@@ -26,6 +26,8 @@ from dashboard.services.strategy_service import (
     get_strategies_dataframe,
 )
 
+from dashboard.services.auth_service import require_auth
+
 # Page configuration
 st.set_page_config(
     page_title="QuantDB — Strategy Library",
@@ -34,8 +36,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Apply unified design system and sidebar
+# Apply unified design system and authentication guard
 apply_terminal_theme()
+require_auth("Strategies")
 render_sidebar(current_page="Strategies")
 
 # Top Disclaimer

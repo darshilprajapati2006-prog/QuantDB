@@ -22,9 +22,13 @@ from dashboard.components.sidebar import render_sidebar
 from dashboard.components.status import render_simulation_banner
 from dashboard.components.metrics import render_metric_card
 from dashboard.components.tables import render_dataframe
-from dashboard.services.analytics_service import get_system_health, get_platform_users
+from dashboard.services.analytics_service import get_system_health, get_platform_users, clear_analytics_service_cache
 from dashboard.services.market_service import get_available_securities, get_available_exchanges
 from dashboard.providers.factory import get_current_data_mode, set_data_mode
+from dashboard.services.auth_service import require_auth
+from src.auth.password import hash_password
+from src.auth.roles import Role, get_role_display_name, normalize_role
+from src.database.repository import Repository
 
 # Page configuration
 st.set_page_config(
@@ -34,8 +38,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Apply unified design system and sidebar
+# Apply unified design system and authentication guard
 apply_terminal_theme()
+require_auth("Admin")
 render_sidebar(current_page="Admin")
 
 # Top Disclaimer
@@ -172,16 +177,17 @@ with admin_tab1:
     users_list = get_platform_users()
     if users_list:
         users_df = pd.DataFrame(users_list)
-        # Ensure display columns match schema
-        display_cols = [c for c in ["user_id", "name", "email", "role", "status", "created_at"] if c in users_df.columns]
+        # Ensure display columns match schema; strictly omit password hashes
+        display_cols = [c for c in ["user_id", "username", "name", "email", "role", "status", "created_at"] if c in users_df.columns]
         users_df = users_df[display_cols]
     else:
-        users_df = pd.DataFrame(columns=["user_id", "name", "email", "role", "status", "created_at"])
+        users_df = pd.DataFrame(columns=["user_id", "username", "name", "email", "role", "status", "created_at"])
 
     render_dataframe(
         users_df,
         column_config={
             "user_id": st.column_config.NumberColumn("User ID", format="#%d"),
+            "username": st.column_config.TextColumn("Username"),
             "name": st.column_config.TextColumn("Full Name"),
             "email": st.column_config.TextColumn("Email Address"),
             "role": st.column_config.TextColumn("Assigned Role"),
@@ -191,17 +197,124 @@ with admin_tab1:
         hide_index=True,
     )
 
+    st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
+    st.markdown("""
+        <div style="font-size: 0.82rem; text-transform: uppercase; color: #E2E8F0; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 10px;">
+            Account Administration & Governance Controls
+        </div>
+    """, unsafe_allow_html=True)
+
+    if users_list:
+        user_options = {
+            f"{u.get('username', u.get('name'))} (ID: {u.get('user_id')}, {u.get('email')})": u
+            for u in users_list
+        }
+        col_m1, col_m2 = st.columns(2)
+
+        with col_m1:
+            st.markdown("<div style='font-size: 0.76rem; font-weight: 700; color: #94A3B8; margin-bottom: 6px;'>UPDATE ROLE & ACCOUNT STATUS</div>", unsafe_allow_html=True)
+            with st.form("admin_update_role_status_form"):
+                sel_user_str = st.selectbox("Select Target User", options=list(user_options.keys()), key="sel_user_edit")
+                sel_u = user_options[sel_user_str]
+                current_role = normalize_role(sel_u.get("role", Role.USER))
+                current_status = sel_u.get("status", "ACTIVE")
+
+                role_choices = [Role.USER, Role.QUANT_TRADER, Role.QUANT_RESEARCHER, Role.ADMIN]
+                new_role = st.selectbox(
+                    "Assign Role",
+                    options=role_choices,
+                    index=role_choices.index(current_role) if current_role in role_choices else 0,
+                    format_func=lambda r: f"{get_role_display_name(r)} ({r})"
+                )
+
+                status_choices = ["ACTIVE", "INACTIVE", "SUSPENDED"]
+                new_status = st.selectbox(
+                    "Account Status",
+                    options=status_choices,
+                    index=status_choices.index(current_status) if current_status in status_choices else 0,
+                )
+
+                submit_update = st.form_submit_button("Save Role & Status", type="primary", use_container_width=True)
+                if submit_update:
+                    try:
+                        repo = Repository()
+                        target_id = sel_u["user_id"]
+                        repo.update_user_role(target_id, new_role)
+                        repo.update_user_status(target_id, new_status)
+                        clear_analytics_service_cache()
+                        st.success(f"Successfully updated user #{target_id} to Role: {new_role}, Status: {new_status}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to update user: {e}")
+
+        with col_m2:
+            st.markdown("<div style='font-size: 0.76rem; font-weight: 700; color: #94A3B8; margin-bottom: 6px;'>SECURE PASSWORD RESET</div>", unsafe_allow_html=True)
+            with st.form("admin_password_reset_form"):
+                pwd_user_str = st.selectbox("Select Target User", options=list(user_options.keys()), key="sel_user_pwd")
+                pwd_u = user_options[pwd_user_str]
+                new_pw = st.text_input("New Password", type="password", placeholder="Enter secure new password", help="Password will be securely hashed with PBKDF2-HMAC-SHA256.")
+
+                submit_pwd = st.form_submit_button("Update Password Hash", type="secondary", use_container_width=True)
+                if submit_pwd:
+                    if not new_pw or len(new_pw) < 6:
+                        st.error("Password must be at least 6 characters long.")
+                    else:
+                        try:
+                            repo = Repository()
+                            target_id = pwd_u["user_id"]
+                            hashed = hash_password(new_pw)
+                            repo.update_user_password(target_id, hashed)
+                            clear_analytics_service_cache()
+                            st.success(f"Password for user #{target_id} securely updated and hashed.")
+                        except Exception as e:
+                            st.error(f"Failed to reset password: {e}")
+
+        with st.expander("➕ Register New Platform User", expanded=False):
+            with st.form("admin_create_user_form"):
+                c_u1, c_u2 = st.columns(2)
+                with c_u1:
+                    new_uname = st.text_input("Username", placeholder="e.g. trader02")
+                    new_fullname = st.text_input("Full Name", placeholder="e.g. John Doe")
+                    new_uemail = st.text_input("Email", placeholder="e.g. john@quantdb.local")
+                with c_u2:
+                    new_urole = st.selectbox("Role", options=[Role.USER, Role.QUANT_TRADER, Role.QUANT_RESEARCHER, Role.ADMIN], format_func=lambda r: f"{get_role_display_name(r)} ({r})")
+                    new_ustatus = st.selectbox("Initial Status", options=["ACTIVE", "INACTIVE", "SUSPENDED"])
+                    new_upass = st.text_input("Initial Password", type="password", placeholder="Temporary secure password")
+
+                create_btn = st.form_submit_button("Create User Account", type="primary", use_container_width=True)
+                if create_btn:
+                    if not new_uname or not new_fullname or not new_uemail or not new_upass:
+                        st.error("All user fields are required.")
+                    else:
+                        try:
+                            repo = Repository()
+                            hashed = hash_password(new_upass)
+                            new_id = repo.create_user(
+                                username=new_uname.strip().lower(),
+                                name=new_fullname.strip(),
+                                email=new_uemail.strip().lower(),
+                                password_hash=hashed,
+                                role=new_urole,
+                                status=new_ustatus,
+                            )
+                            clear_analytics_service_cache()
+                            st.success(f"User account created successfully (User ID #{new_id}).")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to create user: {e}")
+
 with admin_tab2:
     st.markdown("""
         <div style="font-size: 0.82rem; text-transform: uppercase; color: #E2E8F0; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 8px;">
-            Role-Based Access Control (RBAC) Matrix
+            Role-Based Access Control (RBAC) Governance Matrix
         </div>
     """, unsafe_allow_html=True)
 
     rbac_df = pd.DataFrame([
-        {"Role": "ADMIN", "Market Data": "Full Read", "Trading": "Full Paper Trading", "Backtesting": "Full Access", "Portfolio": "All Portfolios", "Admin Console": "Full Control"},
-        {"Role": "QUANT_RESEARCHER", "Market Data": "Full Read", "Trading": "Read / Simulated", "Backtesting": "Full Access", "Portfolio": "Assigned Only", "Admin Console": "View Only"},
-        {"Role": "SIMULATED_TRADER", "Market Data": "Read Quotes", "Trading": "Order Entry", "Backtesting": "Restricted", "Portfolio": "Own Portfolio", "Admin Console": "No Access"},
+        {"Role": "USER", "Display": "User", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Restricted", "Portfolio": "Allowed", "Strategies": "Restricted", "Backtesting": "Restricted", "Reports": "Allowed", "Admin Console": "No Access"},
+        {"Role": "QUANT_TRADER", "Display": "Quant Trader", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Paper Execution", "Portfolio": "Allowed", "Strategies": "View Only", "Backtesting": "Restricted", "Reports": "Allowed", "Admin Console": "No Access"},
+        {"Role": "QUANT_RESEARCHER", "Display": "Quant Researcher", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Restricted", "Portfolio": "Allowed", "Strategies": "Full Access", "Backtesting": "Full Access", "Reports": "Allowed", "Admin Console": "No Access"},
+        {"Role": "ADMIN", "Display": "Admin", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Full Paper Trading", "Portfolio": "All Portfolios", "Strategies": "Full Access", "Backtesting": "Full Access", "Reports": "Allowed", "Admin Console": "Full Control"},
     ])
     render_dataframe(rbac_df, hide_index=True)
 
