@@ -80,6 +80,13 @@ class Repository:
         finally:
             self._close_conn(conn)
 
+    def update_user_username(self, user_id: int, username: str):
+        conn = self._get_connection()
+        try:
+            return queries.update_user_username(conn, user_id, username)
+        finally:
+            self._close_conn(conn)
+
     def update_user_status(self, user_id: int, status: str):
         conn = self._get_connection()
         try:

@@ -10,7 +10,12 @@ import streamlit as st
 from dashboard.components.status import render_sidebar_status
 from dashboard.providers.factory import get_current_data_mode, set_data_mode
 from src.auth.roles import get_allowed_pages, normalize_role, Role
-from dashboard.services.auth_service import is_authenticated, get_current_user, logout
+from dashboard.services.auth_service import (
+    is_authenticated,
+    get_current_user,
+    logout,
+    update_current_username,
+)
 
 ALL_NAV_PAGES = [
     "Overview",
@@ -90,6 +95,20 @@ def render_sidebar(current_page: str = "Overview") -> str:
                 logout()
                 st.rerun()
 
+            with st.expander("Edit username"):
+                with st.form("update_profile_username_form"):
+                    new_username = st.text_input(
+                        "Username",
+                        value=curr_user.get("username") or "",
+                        help="3-30 letters, numbers, or underscores.",
+                    )
+                    save_username = st.form_submit_button("Save username", use_container_width=True)
+                if save_username:
+                    saved, message = update_current_username(new_username)
+                    (st.success if saved else st.error)(message)
+                    if saved:
+                        st.rerun()
+
             # Filter visible navigation pages strictly to those permitted for this role
             nav_pages = get_allowed_pages(role)
         else:
@@ -134,6 +153,12 @@ def render_sidebar(current_page: str = "Overview") -> str:
             if st.button("REAL", use_container_width=True, type="primary" if curr_mode == "real" else "secondary", key="btn_mode_real"):
                 set_data_mode("real")
                 st.rerun()
+
+        if st.button("↻ Refresh database data", use_container_width=True, key="btn_refresh_database_data"):
+            # Dashboard read services use Streamlit's shared data cache. Clearing
+            # it makes external SQL edits visible immediately on the next render.
+            st.cache_data.clear()
+            st.rerun()
 
         # Bottom System Status Widget
         render_sidebar_status()

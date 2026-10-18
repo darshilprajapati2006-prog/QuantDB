@@ -105,6 +105,12 @@ SET role = %s
 WHERE user_id = %s;
 """
 
+UPDATE_USER_USERNAME = """
+UPDATE users
+SET username = %s
+WHERE user_id = %s;
+"""
+
 UPDATE_USER_STATUS = """
 UPDATE users
 SET status = %s
@@ -1091,6 +1097,16 @@ def update_user_role(conn, user_id: int, role: str) -> bool:
     cursor = conn.cursor()
     try:
         cursor.execute(UPDATE_USER_ROLE, (role, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        _close_cursor(cursor)
+
+
+def update_user_username(conn, user_id: int, username: str) -> bool:
+    cursor = conn.cursor()
+    try:
+        cursor.execute(UPDATE_USER_USERNAME, (username, user_id))
         conn.commit()
         return cursor.rowcount > 0
     finally:
