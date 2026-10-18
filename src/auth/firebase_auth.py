@@ -182,8 +182,37 @@ def authenticate(identifier: str, password: str) -> Dict[str, Any]:
     auth = response.json()
     uid = auth.get("localId")
     email = auth.get("email", identifier.strip())
+    id_token = auth.get("idToken")
     role = Role.USER
     name = email.split("@", 1)[0]
+
+    # Verify if email has been verified in Firebase
+    if id_token:
+        try:
+            lookup_resp = requests.post(
+                f"https://identitytoolkit.googleapis.com/v1/accounts:lookup?key={api_key}",
+                json={"idToken": id_token},
+                timeout=10,
+            )
+            if lookup_resp.ok:
+                users_list = lookup_resp.json().get("users", [])
+                if users_list and not users_list[0].get("emailVerified", False):
+                    # Auto re-dispatch verification email link from Firebase
+                    try:
+                        requests.post(
+                            f"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={api_key}",
+                            json={"requestType": "VERIFY_EMAIL", "idToken": id_token},
+                            timeout=10,
+                        )
+                    except Exception:
+                        pass
+                    raise FirebaseAuthError(
+                        "Please verify your email before logging in. A verification link has been sent to your email by Firebase."
+                    )
+        except FirebaseAuthError:
+            raise
+        except Exception as exc:
+            logger.debug("Email verification lookup skipped or failed: %s", exc)
 
     # Firebase Admin verifies the ID token and accesses Firestore with server
     # credentials. Never trust role values supplied by the client.

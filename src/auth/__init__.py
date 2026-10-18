@@ -2,7 +2,7 @@
 QuantDB Authentication & Authorization Package.
 """
 
-from src.auth.email_service import send_otp_email, set_test_email_sender
+from src.auth.email_service import send_otp_email, send_login_alert_email, set_test_email_sender
 from src.auth.otp import generate_otp, hash_otp, verify_otp_hash
 from src.auth.password import hash_password, verify_password
 from src.auth.roles import (

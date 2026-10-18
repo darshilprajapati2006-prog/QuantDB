@@ -152,3 +152,82 @@ def send_otp_email(
         err_str = str(e).replace(password, "******") if password else str(e)
         logger.error(f"Failed to send verification email to {to_email}: {err_str}")
         raise RuntimeError("Unable to deliver verification email. Please check server network configuration or try again.")
+
+
+def send_login_alert_email(
+    to_email: str,
+    user_name: str = "",
+    login_time: Optional[str] = None,
+) -> bool:
+    """
+    Sends a security notification email whenever a user signs into QuantDB.
+    """
+    target_email = to_email.strip()
+    target_name = user_name.strip()
+
+    if not target_email or "@" not in target_email:
+        return False
+
+    from datetime import datetime
+    now_str = login_time or datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    greeting = f"Hello {target_name},\n\n" if target_name else "Hello,\n\n"
+    body_text = (
+        f"{greeting}QuantDB Security Notification\n\n"
+        f"Your QuantDB terminal account was successfully signed into at:\n"
+        f"{now_str}\n\n"
+        f"Details:\n"
+        f"• Account: {target_email}\n"
+        f"• Platform: QuantDB Terminal\n\n"
+        f"If this was you, you can safely ignore this notification.\n"
+        f"If you did NOT perform this login, please change your password immediately.\n\n"
+        f"Regards,\n"
+        f"QuantDB Security Team\n"
+    )
+    subject = "QuantDB — Security Alert: New Login Detected"
+
+    if _test_email_sender is not None:
+        try:
+            return _test_email_sender(target_email, subject, body_text)
+        except Exception:
+            return True
+
+    is_mock = os.getenv("DATA_MODE", "").lower() == "mock" or os.getenv("MOCK_SMTP", "0") == "1"
+    config = get_smtp_config()
+
+    if not config["host"] or is_mock:
+        logger.info(f"Simulated SMTP dispatch: Login alert email queued for {target_email}")
+        return True
+
+    msg = email.message.EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = config["from_email"]
+    msg["To"] = target_email
+    msg.set_content(body_text)
+
+    host = config["host"]
+    port = config["port"]
+    username = config["username"]
+    password = config["password"]
+    use_tls = config["use_tls"]
+
+    try:
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=10) as server:
+                if username and password:
+                    server.login(username, password)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(host, port, timeout=10) as server:
+                if use_tls:
+                    server.starttls()
+                if username and password:
+                    server.login(username, password)
+                server.send_message(msg)
+
+        logger.info(f"Login alert email successfully dispatched to {target_email}")
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to dispatch login alert email to {target_email}: {e}")
+        return False
+

@@ -166,6 +166,14 @@ def login(identifier: str, password: str) -> Tuple[bool, str]:
             st.session_state["role_display"] = user_info["role_display"]
             st.session_state["auth_screen"] = "signin"
             st.session_state["pending_verification"] = None
+
+            # Dispatch security login alert email to user
+            try:
+                from src.auth.email_service import send_login_alert_email
+                send_login_alert_email(to_email=user_info["email"], user_name=user_info.get("name", ""))
+            except Exception as mail_err:
+                logger.warning(f"Could not dispatch login alert email: {mail_err}")
+
             return True, "Authentication successful."
         except firebase_auth.FirebaseAuthError as e:
             return False, str(e)
@@ -188,6 +196,14 @@ def login(identifier: str, password: str) -> Tuple[bool, str]:
         st.session_state["role_display"] = user_info["role_display"]
         st.session_state["auth_screen"] = "signin"
         st.session_state["pending_verification"] = None
+
+        # Dispatch security login alert email to user
+        try:
+            from src.auth.email_service import send_login_alert_email
+            send_login_alert_email(to_email=user_info["email"], user_name=user_info.get("name", ""))
+        except Exception as mail_err:
+            logger.warning(f"Could not dispatch login alert email: {mail_err}")
+
         return True, "Authentication successful."
 
     except UnverifiedEmailError as e:
@@ -238,7 +254,8 @@ def signup(
     phone: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """
-    Handles user registration and transitions to OTP verification.
+    Handles user registration. When Firebase is configured, uses Firebase Email
+    Verification links without OTP codes.
     """
     init_session_state()
     if firebase_auth.is_configured():
@@ -249,12 +266,29 @@ def signup(
         if password != confirm_password:
             return False, "Passwords do not match."
         try:
+            user_info = firebase_auth.sign_up(email=email, password=password, display_name=name)
+            # Sync user profile into local MySQL database without OTP
             try:
-                firebase_auth.sign_up(email=email, password=password, display_name=name)
-            except Exception as fb_err:
-                logger.warning(f"Firebase sign_up warning: {fb_err}")
-        except Exception:
-            pass
+                repo = Repository()
+                existing = repo.get_user_by_email(email)
+                if not existing:
+                    from src.auth.password import hash_password
+                    repo.create_user(
+                        name=name or user_info.get("name", ""),
+                        email=email,
+                        password_hash=hash_password(password),
+                        role=Role.USER,
+                        status="ACTIVE",
+                    )
+            except Exception as sync_err:
+                logger.debug(f"MySQL user sync: {sync_err}")
+
+            return True, f"Account created successfully! A verification email has been sent to {email} by Firebase. Please click the link in the email to verify, then log in."
+        except firebase_auth.FirebaseAuthError as e:
+            return False, str(e)
+        except Exception as e:
+            logger.error(f"Error during Firebase registration: {e}")
+            return False, f"Registration failed: {e}"
 
     try:
         repo = Repository()

@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.auth import firebase_auth
+from src.auth.email_service import send_login_alert_email
 from src.auth.roles import Role
 
 
@@ -44,22 +45,63 @@ def test_authenticate_disabled_user(mock_post, monkeypatch):
 
 
 @patch("src.auth.firebase_auth.requests.post")
+def test_authenticate_unverified_email(mock_post, monkeypatch):
+    monkeypatch.setenv("FIREBASE_API_KEY", "test_key")
+    
+    def side_effect(url, *args, **kwargs):
+        resp = MagicMock()
+        resp.ok = True
+        if "signInWithPassword" in url:
+            resp.json.return_value = {
+                "localId": "uid_unverified",
+                "email": "unverified@quantdb.internal",
+                "idToken": "fake_token",
+            }
+        elif "lookup" in url:
+            resp.json.return_value = {
+                "users": [{"emailVerified": False}]
+            }
+        else:
+            resp.json.return_value = {}
+        return resp
+
+    mock_post.side_effect = side_effect
+
+    with pytest.raises(firebase_auth.FirebaseAuthError, match="Please verify your email before logging in"):
+        firebase_auth.authenticate("unverified@quantdb.internal", "password123")
+
+
+@patch("src.auth.firebase_auth.requests.post")
 def test_authenticate_success_default_user_role(mock_post, monkeypatch):
     monkeypatch.setenv("FIREBASE_API_KEY", "test_key")
     monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT_JSON", raising=False)
     monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT_PATH", raising=False)
 
-    mock_resp = MagicMock()
-    mock_resp.ok = True
-    mock_resp.json.return_value = {
-        "localId": "uid_12345",
-        "email": "trader@quantdb.internal",
-        "idToken": "fake_token",
-    }
-    mock_post.return_value = mock_resp
+    def side_effect(url, *args, **kwargs):
+        resp = MagicMock()
+        resp.ok = True
+        if "signInWithPassword" in url:
+            resp.json.return_value = {
+                "localId": "uid_12345",
+                "email": "trader@quantdb.internal",
+                "idToken": "fake_token",
+            }
+        elif "lookup" in url:
+            resp.json.return_value = {
+                "users": [{"emailVerified": True}]
+            }
+        return resp
+
+    mock_post.side_effect = side_effect
 
     result = firebase_auth.authenticate("trader@quantdb.internal", "secret123")
     assert result["user_id"] == "uid_12345"
     assert result["email"] == "trader@quantdb.internal"
     assert result["role"] == Role.USER
     assert result["role_display"] == "User"
+
+
+def test_send_login_alert_email_mock(monkeypatch):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    sent = send_login_alert_email("trader@quantdb.internal", "Trader Alan")
+    assert sent is True
