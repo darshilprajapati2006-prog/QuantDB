@@ -7,6 +7,9 @@ from datetime import datetime
 from pathlib import Path
 import sys
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Setup sys.path to guarantee clean imports
 _current_dir = Path(__file__).resolve().parent

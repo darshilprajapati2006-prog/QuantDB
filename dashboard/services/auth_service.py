@@ -249,27 +249,12 @@ def signup(
         if password != confirm_password:
             return False, "Passwords do not match."
         try:
-            user_info = firebase_auth.sign_up(email=email, password=password, display_name=name)
             try:
-                repo = Repository()
-                backend_register_user(
-                    name=name or user_info["name"],
-                    username=username or email.split("@")[0],
-                    email=email,
-                    password=password,
-                    confirm_password=confirm_password,
-                    phone=phone,
-                    role=Role.USER,
-                    repo=repo,
-                )
-            except Exception:
-                pass
-            return True, f"Account created! A verification email has been sent to {email}. You can now log in."
-        except firebase_auth.FirebaseAuthError as e:
-            return False, str(e)
-        except Exception as e:
-            logger.error(f"Error during Firebase registration: {e}")
-            return False, f"Registration failed: {e}"
+                firebase_auth.sign_up(email=email, password=password, display_name=name)
+            except Exception as fb_err:
+                logger.warning(f"Firebase sign_up warning: {fb_err}")
+        except Exception:
+            pass
 
     try:
         repo = Repository()
