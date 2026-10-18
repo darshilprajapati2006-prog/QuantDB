@@ -177,6 +177,16 @@ def login(identifier: str, password: str, selected_role: Optional[str] = None) -
 
     clean_id = identifier.strip()
 
+    # Pre-resolve username to email from MySQL repository
+    db_profile = None
+    try:
+        repo = Repository()
+        db_profile = repo.get_user_by_identifier(clean_id)
+        if db_profile and db_profile.get("email"):
+            clean_id = db_profile["email"]
+    except Exception as e:
+        logger.debug(f"Could not lookup user by identifier {clean_id}: {e}")
+
     # Prefer Firebase when configured. Firebase users sign in with email;
     # legacy MySQL accounts remain usable when Firebase is not configured.
     if firebase_auth.is_configured():
@@ -192,18 +202,28 @@ def login(identifier: str, password: str, selected_role: Optional[str] = None) -
             st.session_state["auth_screen"] = "signin"
             st.session_state["pending_verification"] = None
 
-            # Apply selected role override if chosen
-            if selected_role and selected_role in ROLE_OPTION_MAP:
-                chosen_role = ROLE_OPTION_MAP[selected_role]
-                st.session_state["role"] = chosen_role
-                st.session_state["role_display"] = get_role_display_name(chosen_role)
-
-            # Ensure user profile is mirrored in MySQL QuantDB
+            # Enrich from MySQL user record if available
             try:
                 repo = Repository()
-                existing = repo.get_user_by_email(user_info["email"])
-                final_role = st.session_state["role"]
-                if not existing:
+                existing = db_profile or repo.get_user_by_email(user_info["email"])
+                if existing:
+                    if existing.get("username"):
+                        st.session_state["username"] = existing["username"]
+                    if existing.get("name"):
+                        st.session_state["display_name"] = existing["name"]
+                    # If user chose an explicit role at login, update it; otherwise preserve DB role
+                    if selected_role and selected_role in ROLE_OPTION_MAP:
+                        chosen_role = ROLE_OPTION_MAP[selected_role]
+                        st.session_state["role"] = chosen_role
+                        st.session_state["role_display"] = get_role_display_name(chosen_role)
+                        repo.update_user_role(existing["user_id"], chosen_role)
+                    elif existing.get("role"):
+                        st.session_state["role"] = existing["role"]
+                        st.session_state["role_display"] = get_role_display_name(existing["role"])
+                else:
+                    final_role = ROLE_OPTION_MAP[selected_role] if selected_role and selected_role in ROLE_OPTION_MAP else user_info["role"]
+                    st.session_state["role"] = final_role
+                    st.session_state["role_display"] = get_role_display_name(final_role)
                     from src.auth.password import hash_password
                     uname = user_info["email"].split("@")[0]
                     repo.create_user(
@@ -214,8 +234,6 @@ def login(identifier: str, password: str, selected_role: Optional[str] = None) -
                         role=final_role,
                         status="ACTIVE",
                     )
-                elif selected_role:
-                    repo.update_user_role(existing["user_id"], final_role)
                 from dashboard.services.analytics_service import clear_analytics_service_cache
                 clear_analytics_service_cache()
             except Exception as sync_err:

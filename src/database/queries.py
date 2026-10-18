@@ -21,11 +21,13 @@ from .connection import DatabaseConnectionError
 GET_USER_BY_ID = """
 SELECT
     user_id,
+    username,
     name,
     email,
     password_hash,
     role,
     status,
+    is_verified,
     created_at
 FROM users
 WHERE user_id = %s;
@@ -34,11 +36,13 @@ WHERE user_id = %s;
 GET_USER_BY_EMAIL = """
 SELECT
     user_id,
+    username,
     name,
     email,
     password_hash,
     role,
     status,
+    is_verified,
     created_at
 FROM users
 WHERE email = %s;
@@ -47,28 +51,32 @@ WHERE email = %s;
 GET_USER_BY_USERNAME = """
 SELECT
     user_id,
+    username,
     name,
     email,
     password_hash,
     role,
     status,
+    is_verified,
     created_at
 FROM users
-WHERE email = %s;
+WHERE username = %s OR email = %s;
 """
 
 GET_USER_BY_IDENTIFIER = """
 SELECT
     user_id,
+    username,
     name,
     email,
     password_hash,
     role,
     status,
+    is_verified,
     created_at
 FROM users
-WHERE email = %s OR email LIKE CONCAT(%s, '@%%')
-ORDER BY (email = %s) DESC
+WHERE email = %s OR username = %s OR email LIKE CONCAT(%s, '@%%')
+ORDER BY (email = %s) DESC, (username = %s) DESC
 LIMIT 1;
 """
 
@@ -1043,9 +1051,15 @@ def get_user_by_email(conn, email: str) -> Optional[Dict[str, Any]]:
 def get_user_by_username(conn, username: str) -> Optional[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
-        # Schema contract: email is the primary credential in users table.
+        cursor.execute(GET_USER_BY_USERNAME, (username, username))
+        row = cursor.fetchone()
+        if row:
+            return _normalize_user_dict(row)
         # Fall back to identifier match if username entered without domain.
-        cursor.execute(GET_USER_BY_IDENTIFIER, (username, username, username))
+        cursor.execute(
+            GET_USER_BY_IDENTIFIER,
+            (username, username, username, username, username)
+        )
         return _normalize_user_dict(cursor.fetchone())
     finally:
         _close_cursor(cursor)
@@ -1054,7 +1068,10 @@ def get_user_by_username(conn, username: str) -> Optional[Dict[str, Any]]:
 def get_user_by_identifier(conn, identifier: str) -> Optional[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
-        cursor.execute(GET_USER_BY_IDENTIFIER, (identifier, identifier, identifier))
+        cursor.execute(
+            GET_USER_BY_IDENTIFIER,
+            (identifier, identifier, identifier, identifier, identifier)
+        )
         return _normalize_user_dict(cursor.fetchone())
     finally:
         _close_cursor(cursor)
