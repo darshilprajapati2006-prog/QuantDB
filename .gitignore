@@ -14,8 +14,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
+!web/src/lib/
 parts/
 sdist/
 var/
@@ -221,3 +222,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node / Web dependencies
+node_modules/
+**/node_modules/
+dist/
+
+# Firebase credentials & Service Account keys (never commit)
+*service_account*.json
+*serviceAccountKey*.json
+*firebase-adminsdk*.json
+serviceAccountKey.json

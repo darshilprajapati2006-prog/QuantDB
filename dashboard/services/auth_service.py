@@ -39,6 +39,7 @@ from src.auth.service import (
 )
 from src.database.repository import Repository
 from dashboard.providers.factory import get_current_data_mode
+from src.auth import firebase_auth
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,27 @@ def login(identifier: str, password: str) -> Tuple[bool, str]:
 
     clean_id = identifier.strip()
 
+    # Prefer Firebase when configured. Firebase users sign in with email;
+    # legacy MySQL accounts remain usable when Firebase is not configured.
+    if firebase_auth.is_configured():
+        try:
+            user_info = firebase_auth.authenticate(clean_id, password)
+            st.session_state["authenticated"] = True
+            st.session_state["user_id"] = user_info["user_id"]
+            st.session_state["username"] = user_info["username"]
+            st.session_state["display_name"] = user_info["name"]
+            st.session_state["email"] = user_info["email"]
+            st.session_state["role"] = user_info["role"]
+            st.session_state["role_display"] = user_info["role_display"]
+            st.session_state["auth_screen"] = "signin"
+            st.session_state["pending_verification"] = None
+            return True, "Authentication successful."
+        except firebase_auth.FirebaseAuthError as e:
+            return False, str(e)
+        except Exception:
+            logger.exception("Firebase authentication failed unexpectedly")
+            return False, "Firebase sign-in failed. Please try again."
+
     # Attempt MySQL Database Authentication first
     try:
         repo = Repository()
@@ -219,6 +241,36 @@ def signup(
     Handles user registration and transitions to OTP verification.
     """
     init_session_state()
+    if firebase_auth.is_configured():
+        if not email or "@" not in email:
+            return False, "Please enter a valid email address."
+        if not password or len(password) < 6:
+            return False, "Password must be at least 6 characters."
+        if password != confirm_password:
+            return False, "Passwords do not match."
+        try:
+            user_info = firebase_auth.sign_up(email=email, password=password, display_name=name)
+            try:
+                repo = Repository()
+                backend_register_user(
+                    name=name or user_info["name"],
+                    username=username or email.split("@")[0],
+                    email=email,
+                    password=password,
+                    confirm_password=confirm_password,
+                    phone=phone,
+                    role=Role.USER,
+                    repo=repo,
+                )
+            except Exception:
+                pass
+            return True, f"Account created! A verification email has been sent to {email}. You can now log in."
+        except firebase_auth.FirebaseAuthError as e:
+            return False, str(e)
+        except Exception as e:
+            logger.error(f"Error during Firebase registration: {e}")
+            return False, f"Registration failed: {e}"
+
     try:
         repo = Repository()
         res = backend_register_user(
@@ -469,15 +521,15 @@ def render_login_screen() -> None:
             with tab_signin:
                 with st.form("quantdb_login_form", clear_on_submit=False):
                     username_input = st.text_input(
-                        "Username or Email",
-                        placeholder="e.g. admin01 or user@quantdb.local",
-                        help="Enter your registered platform username or institutional email.",
+                        "Email",
+                        placeholder="you@example.com",
+                        help="Use the email address registered in Firebase Authentication.",
                     )
                     password_input = st.text_input(
                         "Password",
                         type="password",
                         placeholder="••••••••••••",
-                        help="Database-backed secure password authentication.",
+                        help="Password for your Firebase Authentication account.",
                     )
 
                     submit_btn = st.form_submit_button(
