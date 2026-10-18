@@ -45,30 +45,24 @@ def test_authenticate_disabled_user(mock_post, monkeypatch):
 
 
 @patch("src.auth.firebase_auth.requests.post")
-def test_authenticate_unverified_email(mock_post, monkeypatch):
+def test_authenticate_no_verification_required(mock_post, monkeypatch):
+    """Sign-in should succeed even when emailVerified is False — no verification wall."""
     monkeypatch.setenv("FIREBASE_API_KEY", "test_key")
-    
-    def side_effect(url, *args, **kwargs):
-        resp = MagicMock()
-        resp.ok = True
-        if "signInWithPassword" in url:
-            resp.json.return_value = {
-                "localId": "uid_unverified",
-                "email": "unverified@quantdb.internal",
-                "idToken": "fake_token",
-            }
-        elif "lookup" in url:
-            resp.json.return_value = {
-                "users": [{"emailVerified": False}]
-            }
-        else:
-            resp.json.return_value = {}
-        return resp
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT_JSON", raising=False)
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT_PATH", raising=False)
 
-    mock_post.side_effect = side_effect
+    mock_resp = MagicMock()
+    mock_resp.ok = True
+    mock_resp.json.return_value = {
+        "localId": "uid_noverify",
+        "email": "user@example.com",
+        "idToken": "fake_token",
+    }
+    mock_post.return_value = mock_resp
 
-    with pytest.raises(firebase_auth.FirebaseAuthError, match="Please verify your email before logging in"):
-        firebase_auth.authenticate("unverified@quantdb.internal", "password123")
+    # Must NOT raise — no email verification check
+    result = firebase_auth.authenticate("user@example.com", "password123")
+    assert result["email"] == "user@example.com"
 
 
 @patch("src.auth.firebase_auth.requests.post")
@@ -114,10 +108,13 @@ def test_validate_email_domain_rejects_fake():
     assert "does not exist" in err
 
 
-def test_sign_up_rejects_fake_domain_before_firebase(monkeypatch):
+def test_sign_up_allows_any_valid_email_format(monkeypatch):
+    """sign_up should NOT reject based on MX/domain — removed in favour of password-only flow."""
     monkeypatch.setenv("FIREBASE_API_KEY", "test_key")
-    with pytest.raises(firebase_auth.FirebaseAuthError, match="does not exist"):
-        firebase_auth.sign_up("user@fake123notrealdomainxyz99.com", "Password123")
+    # Firebase will reject the dummy key — verify it raises a Firebase error (not a domain error)
+    with pytest.raises(firebase_auth.FirebaseAuthError) as exc_info:
+        firebase_auth.sign_up("user@example.com", "Password123")
+    assert "does not exist" not in str(exc_info.value)
 
 
 def test_resend_verification_email(monkeypatch):

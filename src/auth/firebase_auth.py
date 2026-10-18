@@ -96,7 +96,7 @@ def _get_admin_app(project_id: str):
 
 
 def sign_up(email: str, password: str, display_name: str = "") -> Dict[str, Any]:
-    """Create a new user with Firebase Authentication."""
+    """Create a new user with Firebase Authentication (password-only, no email verification required)."""
     api_key = _config("FIREBASE_API_KEY")
     if not api_key:
         raise FirebaseAuthError("Firebase Authentication is not configured.")
@@ -104,11 +104,6 @@ def sign_up(email: str, password: str, display_name: str = "") -> Dict[str, Any]
         raise FirebaseAuthError("A valid email address is required.")
     if len(password) < 6:
         raise FirebaseAuthError("Password must be at least 6 characters.")
-
-    # 1. Validate email domain and MX records: do NOT enter user into Firebase if email domain is invalid/fake
-    is_valid, domain_err = validate_email_domain(email)
-    if not is_valid:
-        raise FirebaseAuthError(domain_err or "Please provide a valid, active email address.")
 
     try:
         response = _post(
@@ -135,11 +130,7 @@ def sign_up(email: str, password: str, display_name: str = "") -> Dict[str, Any]
     name = display_name.strip() or clean_email.split("@")[0]
     id_token = auth.get("idToken")
 
-    # 2. Complete non-blocking background tasks asynchronously:
-    # - Set displayName in Firebase
-    # - Dispatch Firebase verification email (sendOobCode)
-    # - Dispatch instant QuantDB welcome & verification guidance email via Gmail SMTP
-    # - Record initial role in Firestore if admin is configured
+    # Set displayName and sync to Firestore asynchronously (non-blocking)
     def _async_post_signup(token, u_email, u_name, u_uid):
         if u_name and token:
             try:
@@ -150,24 +141,6 @@ def sign_up(email: str, password: str, display_name: str = "") -> Dict[str, Any]
                 )
             except Exception:
                 pass
-
-        if token:
-            try:
-                _post(
-                    f"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={api_key}",
-                    json={"requestType": "VERIFY_EMAIL", "idToken": token},
-                    timeout=8,
-                )
-            except Exception as mail_exc:
-                logger.warning("Firebase email verification dispatch failed: %s", mail_exc)
-
-        # Dispatch instant welcome & verification guidance email via SMTP
-        try:
-            from src.auth.email_service import send_registration_welcome_email
-
-            send_registration_welcome_email(to_email=u_email, user_name=u_name)
-        except Exception as smtp_exc:
-            logger.debug("Instant welcome email dispatch error: %s", smtp_exc)
 
         if _has_admin_credentials():
             project_id = _config("FIREBASE_PROJECT_ID", "quantdb-728ef")
@@ -237,45 +210,6 @@ def authenticate(identifier: str, password: str) -> Dict[str, Any]:
     id_token = auth.get("idToken")
     role = Role.USER
     name = email.split("@", 1)[0]
-
-    # Fast verification check
-    if id_token:
-        try:
-            lookup_resp = _post(
-                f"https://identitytoolkit.googleapis.com/v1/accounts:lookup?key={api_key}",
-                json={"idToken": id_token},
-                timeout=8,
-            )
-            if lookup_resp.ok:
-                users_list = lookup_resp.json().get("users", [])
-                if users_list and not users_list[0].get("emailVerified", False):
-                    # Auto re-dispatch verification email link from Firebase asynchronously
-                    import threading
-
-                    def _resend_verify(token, u_mail, u_nm):
-                        try:
-                            _post(
-                                f"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={api_key}",
-                                json={"requestType": "VERIFY_EMAIL", "idToken": token},
-                                timeout=8,
-                            )
-                        except Exception:
-                            pass
-                        try:
-                            from src.auth.email_service import send_registration_welcome_email
-
-                            send_registration_welcome_email(to_email=u_mail, user_name=u_nm)
-                        except Exception:
-                            pass
-
-                    threading.Thread(target=_resend_verify, args=(id_token, email, name), daemon=True).start()
-                    raise FirebaseAuthError(
-                        "Please verify your email before logging in. A verification link has been sent to your email. (Please check your Spam / Junk folder if not found)."
-                    )
-        except FirebaseAuthError:
-            raise
-        except Exception as exc:
-            logger.debug("Email verification lookup skipped or failed: %s", exc)
 
     # Firebase Admin verifies the ID token and accesses Firestore with server
     # credentials. Never trust role values supplied by the client.
