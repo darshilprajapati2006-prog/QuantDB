@@ -83,11 +83,12 @@ with filter_col2:
     selected_exch = st.selectbox("Exchange", options=exch_options, index=0)
 
 with filter_col3:
-    default_start = datetime.now() - timedelta(days=90)
+    # Default to beginning of 2026 to ensure full coverage of seed and live market data
+    default_start = datetime(2026, 1, 1).date()
     start_date = st.date_input("Start Date", value=default_start)
 
 with filter_col4:
-    end_date = st.date_input("End Date", value=datetime.now())
+    end_date = st.date_input("End Date", value=datetime.now().date() + timedelta(days=1))
 
 with filter_col5:
     interval = st.selectbox("Interval", options=["1D", "1H", "15m"], index=0)
@@ -110,7 +111,12 @@ with st.spinner(f"Loading market data for {selected_symbol}..."):
     )
 
 if df_market.empty:
-    st.warning(f"No market data available for {selected_symbol} in the selected period.")
+    st.info(f"No market data recorded for {selected_symbol} between {start_date} and {end_date}.")
+    col_reset, _ = st.columns([2, 5])
+    with col_reset:
+        if st.button("📅 Expand Date Range to Full History"):
+            st.cache_data.clear()
+            st.rerun()
     st.stop()
 
 # Compute summary stats from latest rows

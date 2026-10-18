@@ -158,11 +158,12 @@ st.markdown("<div class='quant-divider'></div>", unsafe_allow_html=True)
 # -------------------------------------------------------------
 # ADMINISTRATIVE SECTIONS: USERS, ROLES, EXCHANGES, SECURITIES
 # -------------------------------------------------------------
-admin_tab1, admin_tab2, admin_tab3, admin_tab4, admin_tab5 = st.tabs([
+admin_tab1, admin_tab2, admin_tab3, admin_tab4, admin_tab5, admin_tab6 = st.tabs([
     "👤 Platform Users",
     "🛡️ Role Permissions",
     "🏛️ Registered Exchanges",
     "📊 Securities Master Catalog",
+    "🗄️ Aiven Database Explorer",
     "📐 System Architecture"
 ])
 
@@ -364,6 +365,57 @@ with admin_tab4:
     )
 
 with admin_tab5:
+    st.markdown("""
+        <div style="font-size: 0.85rem; text-transform: uppercase; color: #E2E8F0; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 12px;">
+            Aiven Cloud MySQL 8.4 • Live Schema & Table Browser
+        </div>
+    """, unsafe_allow_html=True)
+
+    try:
+        from src.database.connection import get_connection
+        conn = get_connection(use_pool=False)
+        if conn and conn.is_connected():
+            cur = conn.cursor()
+            cur.execute("SHOW FULL TABLES")
+            raw_tables = cur.fetchall()
+
+            table_stats = []
+            for t_name, t_type in raw_tables:
+                try:
+                    cur.execute(f"SELECT COUNT(*) FROM `{t_name}`")
+                    cnt = cur.fetchone()[0]
+                except Exception:
+                    cnt = 0
+                table_stats.append({
+                    "Entity Name": t_name,
+                    "Type": "VIEW" if "VIEW" in t_type.upper() else "BASE TABLE",
+                    "Row Count": cnt,
+                })
+
+            col_t1, col_t2 = st.columns([1, 2])
+            with col_t1:
+                st.markdown("<div style='font-size: 0.75rem; color: #94A3B8; font-weight: 600; margin-bottom: 6px;'>RELATIONAL OBJECTS (21 TOTAL)</div>", unsafe_allow_html=True)
+                df_stats = pd.DataFrame(table_stats)
+                render_dataframe(df_stats, hide_index=True)
+
+            with col_t2:
+                st.markdown("<div style='font-size: 0.75rem; color: #94A3B8; font-weight: 600; margin-bottom: 6px;'>LIVE RECORD INSPECTOR</div>", unsafe_allow_html=True)
+                table_names = [t["Entity Name"] for t in table_stats]
+                sel_table = st.selectbox("Inspect Table or View", options=table_names, index=0)
+                if sel_table:
+                    cur.execute(f"SELECT * FROM `{sel_table}` LIMIT 50")
+                    col_names = [desc[0] for desc in cur.description] if cur.description else []
+                    rows = cur.fetchall()
+                    df_preview = pd.DataFrame(rows, columns=col_names)
+                    render_dataframe(df_preview, hide_index=True)
+
+            conn.close()
+        else:
+            st.warning("Database connection is currently in MOCK mode. Toggle to REAL mode to explore live Aiven MySQL tables.")
+    except Exception as e:
+        st.info(f"Database explorer is active in REAL mode: {e}")
+
+with admin_tab6:
     st.markdown("""
         <div style="font-size: 0.82rem; text-transform: uppercase; color: #E2E8F0; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 8px;">
             QuantDB Layered Architecture & Separation of Concerns

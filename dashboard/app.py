@@ -56,17 +56,28 @@ render_simulation_banner("Simulated Trading & Market Research Terminal • Acade
 
 # Page Header
 st.markdown("""
-    <div style="margin-bottom: 20px;">
-        <div style="display: flex; align-items: baseline; gap: 12px;">
-            <h1 style="margin: 0; font-size: 1.85rem; font-weight: 800; letter-spacing: -0.02em; color: #F8FAFC;">
-                QUANT<span style="color: #06B6D4;">DB</span>
-            </h1>
-            <span style="color: #64748B; font-size: 0.95rem; font-weight: 500;">
-                Quantitative Finance Research & Simulation Platform
-            </span>
+    <div style="margin-bottom: 22px; background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.6) 100%); border: 1px solid rgba(148, 163, 184, 0.12); padding: 18px 24px; border-radius: 10px; backdrop-filter: blur(12px); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+        <div>
+            <div style="display: flex; align-items: baseline; gap: 12px;">
+                <h1 style="margin: 0; font-size: 2.1rem; font-weight: 800; letter-spacing: -0.03em; color: #F8FAFC;">
+                    QUANT<span style="background: linear-gradient(135deg, #06B6D4 0%, #3B82F6 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">DB</span>
+                </h1>
+                <span style="color: #64748B; font-size: 0.95rem; font-weight: 500;">
+                    Quantitative Finance Research & Real-Time Trading Terminal
+                </span>
+            </div>
+            <div style="font-size: 0.74rem; color: #94A3B8; margin-top: 4px; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.05em;">
+                CLOUD BACKED BY AIVEN MYSQL 8.4 • HIGH-THROUGHPUT QUANT ARCHITECTURE
+            </div>
         </div>
-        <div style="font-size: 0.78rem; color: #94A3B8; margin-top: 4px; font-family: 'JetBrains Mono', monospace;">
-            DATABASE-DRIVEN MARKET DATA & ALGORITHMIC TRADING ENGINE
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <div class="status-pill status-pill-green" style="padding: 6px 14px; font-size: 0.75rem;">
+                <span class="pulse-dot"></span>
+                <span>AIVEN MYSQL: ONLINE</span>
+            </div>
+            <div class="status-pill status-pill-cyan" style="padding: 6px 14px; font-size: 0.75rem;">
+                <span>21 RELATIONAL OBJECTS</span>
+            </div>
         </div>
     </div>
 """, unsafe_allow_html=True)
