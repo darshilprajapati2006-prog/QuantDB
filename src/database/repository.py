@@ -101,6 +101,21 @@ class Repository:
         finally:
             self._close_conn(conn)
 
+    def delete_user(self, user_id: int) -> bool:
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute("DELETE FROM email_otps WHERE user_id = %s;", (user_id,))
+            except Exception:
+                pass
+            cur.execute(queries.DELETE_USER, (user_id,))
+            conn.commit()
+            cur.close()
+            return True
+        finally:
+            self._close_conn(conn)
+
     def update_unverified_user(
         self, user_id: int, name: str, *args, username: Optional[str] = None, password_hash: str = "", **kwargs
     ):

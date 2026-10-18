@@ -60,14 +60,19 @@ def get_portfolio_risk_metrics(portfolio_id: int = 1) -> Dict:
             }
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def _cached_get_platform_users(data_mode: str) -> List[Dict]:
     provider = get_provider()
     return provider.get_users()
 
 
-def get_platform_users() -> list:
+def get_platform_users(force_refresh: bool = False) -> list:
     """Retrieves all registered platform users from the active provider."""
+    if force_refresh:
+        try:
+            _cached_get_platform_users.clear()
+        except Exception:
+            pass
     try:
         mode = get_current_data_mode()
         return _cached_get_platform_users(mode)

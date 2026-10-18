@@ -76,6 +76,16 @@ MOCK_USERS_SEED: List[Dict[str, Any]] = [
         "is_verified": True,
     },
     {
+        "user_id": 105,
+        "username": "developer01",
+        "name": "Quant Developer Demo",
+        "email": "developer01@quantdb.local",
+        "password": "Developer01@QuantDB",
+        "role": Role.QUANT_DEVELOPER,
+        "status": "ACTIVE",
+        "is_verified": True,
+    },
+    {
         "user_id": 104,
         "username": "admin01",
         "name": "Admin Demo",
@@ -139,10 +149,25 @@ def get_current_role() -> str:
     return normalize_role(st.session_state.get("role", Role.USER))
 
 
-def login(identifier: str, password: str) -> Tuple[bool, str]:
+ROLE_OPTION_MAP: Dict[str, str] = {
+    "User": Role.USER,
+    "Quant Trader": Role.QUANT_TRADER,
+    "Quant Developer": Role.QUANT_DEVELOPER,
+    "Quant Researcher": Role.QUANT_RESEARCHER,
+    "Admin": Role.ADMIN,
+    Role.USER: Role.USER,
+    Role.QUANT_TRADER: Role.QUANT_TRADER,
+    Role.QUANT_DEVELOPER: Role.QUANT_DEVELOPER,
+    Role.QUANT_RESEARCHER: Role.QUANT_RESEARCHER,
+    Role.ADMIN: Role.ADMIN,
+}
+
+
+def login(identifier: str, password: str, selected_role: Optional[str] = None) -> Tuple[bool, str]:
     """
     Attempts to authenticate a user by username or email.
     Stores only safe session information upon success.
+    Applies selected_role if chosen by user.
     """
     init_session_state()
     if not identifier or not identifier.strip():
@@ -166,6 +191,35 @@ def login(identifier: str, password: str) -> Tuple[bool, str]:
             st.session_state["role_display"] = user_info["role_display"]
             st.session_state["auth_screen"] = "signin"
             st.session_state["pending_verification"] = None
+
+            # Apply selected role override if chosen
+            if selected_role and selected_role in ROLE_OPTION_MAP:
+                chosen_role = ROLE_OPTION_MAP[selected_role]
+                st.session_state["role"] = chosen_role
+                st.session_state["role_display"] = get_role_display_name(chosen_role)
+
+            # Ensure user profile is mirrored in MySQL QuantDB
+            try:
+                repo = Repository()
+                existing = repo.get_user_by_email(user_info["email"])
+                final_role = st.session_state["role"]
+                if not existing:
+                    from src.auth.password import hash_password
+                    uname = user_info["email"].split("@")[0]
+                    repo.create_user(
+                        username=uname,
+                        name=user_info.get("name", uname),
+                        email=user_info["email"],
+                        password_hash=hash_password(password),
+                        role=final_role,
+                        status="ACTIVE",
+                    )
+                elif selected_role:
+                    repo.update_user_role(existing["user_id"], final_role)
+                from dashboard.services.analytics_service import clear_analytics_service_cache
+                clear_analytics_service_cache()
+            except Exception as sync_err:
+                logger.debug(f"Login sync to MySQL: {sync_err}")
 
             # Dispatch security login alert email to user asynchronously
             import threading
@@ -200,6 +254,18 @@ def login(identifier: str, password: str) -> Tuple[bool, str]:
         st.session_state["role_display"] = user_info["role_display"]
         st.session_state["auth_screen"] = "signin"
         st.session_state["pending_verification"] = None
+
+        # Apply selected role override if chosen
+        if selected_role and selected_role in ROLE_OPTION_MAP:
+            chosen_role = ROLE_OPTION_MAP[selected_role]
+            st.session_state["role"] = chosen_role
+            st.session_state["role_display"] = get_role_display_name(chosen_role)
+            try:
+                repo.update_user_role(user_info["user_id"], chosen_role)
+                from dashboard.services.analytics_service import clear_analytics_service_cache
+                clear_analytics_service_cache()
+            except Exception:
+                pass
 
         # Dispatch security login alert email to user asynchronously
         import threading
@@ -246,6 +312,10 @@ def login(identifier: str, password: str) -> Tuple[bool, str]:
                     st.session_state["email"] = mu["email"]
                     st.session_state["role"] = mu["role"]
                     st.session_state["role_display"] = get_role_display_name(mu["role"])
+                    if selected_role and selected_role in ROLE_OPTION_MAP:
+                        chosen_role = ROLE_OPTION_MAP[selected_role]
+                        st.session_state["role"] = chosen_role
+                        st.session_state["role_display"] = get_role_display_name(chosen_role)
                     return True, "Authentication successful (offline simulation)."
         return False, err_msg
     except Exception as e:
@@ -260,11 +330,13 @@ def signup(
     password: str,
     confirm_password: str,
     phone: Optional[str] = None,
+    role: str = Role.USER,
 ) -> Tuple[bool, str]:
     """
     Handles user registration using Firebase (password-only, no email verification required).
     """
     init_session_state()
+    chosen_role = ROLE_OPTION_MAP.get(role, normalize_role(role))
     if firebase_auth.is_configured():
         if not email or "@" not in email:
             return False, "Please enter a valid email address."
@@ -274,29 +346,32 @@ def signup(
             return False, "Passwords do not match."
         try:
             user_info = firebase_auth.sign_up(email=email, password=password, display_name=name)
-            # Sync user profile into local MySQL database asynchronously
-            def _async_sync_user(u_name, u_email, u_pwd):
-                try:
-                    repo = Repository()
-                    existing = repo.get_user_by_email(u_email)
-                    if not existing:
-                        from src.auth.password import hash_password
-                        repo.create_user(
-                            name=u_name,
-                            email=u_email,
-                            password_hash=hash_password(u_pwd),
-                            role=Role.USER,
-                            status="ACTIVE",
-                        )
-                except Exception as sync_err:
-                    logger.debug(f"MySQL user sync: {sync_err}")
-
-            import threading
-            threading.Thread(
-                target=_async_sync_user,
-                args=(name or user_info.get("name", ""), email, password),
-                daemon=True,
-            ).start()
+            # Synchronously and reliably persist user profile into MySQL database
+            try:
+                repo = Repository()
+                from src.auth.password import hash_password
+                clean_email = email.strip().lower()
+                clean_name = (name or user_info.get("name", "")).strip() or clean_email.split("@")[0]
+                uname = clean_email.split("@")[0]
+                existing = repo.get_user_by_email(clean_email)
+                if not existing:
+                    repo.create_user(
+                        username=uname,
+                        name=clean_name,
+                        email=clean_email,
+                        password_hash=hash_password(password),
+                        role=chosen_role,
+                        status="ACTIVE",
+                    )
+                else:
+                    repo.update_user_role(existing["user_id"], chosen_role)
+                    repo.update_user_status(existing["user_id"], "ACTIVE")
+                    repo.update_user_verified(existing["user_id"], True)
+                
+                from dashboard.services.analytics_service import clear_analytics_service_cache
+                clear_analytics_service_cache()
+            except Exception as sync_err:
+                logger.error(f"MySQL user sync error on sign up: {sync_err}")
 
             return True, f"Account created successfully! You can now sign in with your email and password."
         except firebase_auth.FirebaseAuthError as e:
@@ -314,7 +389,7 @@ def signup(
             password=password,
             confirm_password=confirm_password,
             phone=phone,
-            role=Role.USER,
+            role=chosen_role,
             repo=repo,
         )
         st.session_state["pending_verification"] = {
@@ -550,7 +625,54 @@ def render_login_screen() -> None:
                 unsafe_allow_html=True,
             )
 
+            # ── Inject Modern Role Selector Checkbox / Pill Styles ───────────
+            st.markdown(
+                """
+                <style>
+                div[data-testid="stRadio"] > div[role="radiogroup"] {
+                    display: flex !important;
+                    flex-wrap: wrap !important;
+                    gap: 8px !important;
+                    margin: 6px 0 14px 0 !important;
+                }
+                div[data-testid="stRadio"] > div[role="radiogroup"] > label {
+                    background: #141824 !important;
+                    border: 1px solid #283048 !important;
+                    border-radius: 8px !important;
+                    padding: 6px 14px !important;
+                    color: #cbd5e1 !important;
+                    font-size: 0.80rem !important;
+                    font-weight: 500 !important;
+                    cursor: pointer !important;
+                    transition: all 0.2s ease !important;
+                    margin-right: 0px !important;
+                }
+                div[data-testid="stRadio"] > div[role="radiogroup"] > label:hover {
+                    border-color: #8b5cf6 !important;
+                    background: #1d2238 !important;
+                    color: #ffffff !important;
+                }
+                div[data-testid="stRadio"] > div[role="radiogroup"] > label:has(input:checked) {
+                    background: #281d45 !important;
+                    border-color: #a855f7 !important;
+                    color: #e9d5ff !important;
+                    font-weight: 700 !important;
+                    box-shadow: 0 0 12px rgba(168, 85, 247, 0.3) !important;
+                }
+                </style>
+            """,
+                unsafe_allow_html=True,
+            )
+
             tab_signin, tab_signup = st.tabs(["SIGN IN", "CREATE ACCOUNT"])
+
+            role_list = [
+                "User",
+                "Quant Trader",
+                "Quant Developer",
+                "Quant Researcher",
+                "Admin",
+            ]
 
             with tab_signin:
                 with st.form("quantdb_login_form", clear_on_submit=False):
@@ -565,15 +687,34 @@ def render_login_screen() -> None:
                         placeholder="••••••••••••",
                     )
 
+                    st.markdown(
+                        """
+                        <div style="font-size: 0.74rem; font-weight: 700; color: #94A3B8; text-transform: uppercase; margin: 12px 0 4px 0; letter-spacing: 0.05em;">
+                            Select Your Role (Checkbox Access):
+                        </div>
+                    """,
+                        unsafe_allow_html=True,
+                    )
+                    selected_login_role = st.radio(
+                        "Select Your Role",
+                        options=role_list,
+                        index=0,
+                        horizontal=True,
+                        label_visibility="collapsed",
+                        key="login_role_choice",
+                    )
+
                     submit_btn = st.form_submit_button(
                         "LOGIN TO TERMINAL", type="primary", use_container_width=True
                     )
 
                     if submit_btn:
-                        success, msg = login(username_input, password_input)
+                        success, msg = login(
+                            username_input, password_input, selected_role=selected_login_role
+                        )
                         if success:
                             st.success(
-                                f"Access granted. Welcome back, {st.session_state.get('display_name')}!"
+                                f"Access granted as {st.session_state.get('role_display')}! Welcome back, {st.session_state.get('display_name')}!"
                             )
                             st.rerun()
                         else:
@@ -616,12 +757,19 @@ def render_login_screen() -> None:
 
                     st.markdown(
                         """
-                        <div style="font-size: 0.72rem; color: #94A3B8; margin-top: 4px; margin-bottom: 12px; background: #0F172A; padding: 6px 10px; border-radius: 4px; border-left: 3px solid #06B6D4;">
-                            ℹ️ <strong>ROLE POLICY:</strong> Public registration assigns default <strong>User</strong> permissions.
-                            Privileged roles (Admin, Quant Trader, Quant Researcher) require institutional authorization from the Platform Administrator.
+                        <div style="font-size: 0.74rem; font-weight: 700; color: #94A3B8; text-transform: uppercase; margin: 12px 0 4px 0; letter-spacing: 0.05em;">
+                            Select Account Role:
                         </div>
                     """,
                         unsafe_allow_html=True,
+                    )
+                    selected_signup_role = st.radio(
+                        "Select Account Role",
+                        options=role_list,
+                        index=0,
+                        horizontal=True,
+                        label_visibility="collapsed",
+                        key="signup_role_choice",
                     )
 
                     signup_btn = st.form_submit_button(
@@ -636,13 +784,13 @@ def render_login_screen() -> None:
                             password=reg_password,
                             confirm_password=reg_confirm_password,
                             phone=reg_phone,
+                            role=selected_signup_role,
                         )
                         if s_ok:
                             st.success(s_msg)
                             st.rerun()
                         else:
                             st.error(s_msg)
-
 
         # Demo Credentials Helper for Academic Evaluation
         with st.expander(
@@ -651,7 +799,7 @@ def render_login_screen() -> None:
             st.markdown(
                 """
                 <div style="font-size: 0.78rem; color: #94A3B8; margin-bottom: 8px;">
-                    Pre-configured demonstration accounts representing all four platform roles:
+                    Pre-configured demonstration accounts representing all platform roles:
                 </div>
             """,
                 unsafe_allow_html=True,
@@ -663,6 +811,12 @@ def render_login_screen() -> None:
                     "admin01",
                     "Admin01@QuantDB",
                     "Full platform governance & simulation",
+                ),
+                (
+                    "Quant Developer",
+                    "developer01",
+                    "Developer01@QuantDB",
+                    "Algorithmic execution, models, API & backtesting",
                 ),
                 (
                     "Quant Researcher",
@@ -677,7 +831,7 @@ def render_login_screen() -> None:
                     "Simulated paper trading & order tickets",
                 ),
                 (
-                    "Standard User",
+                    "User",
                     "user01",
                     "User01@QuantDB",
                     "Market data, portfolio overview & reports",

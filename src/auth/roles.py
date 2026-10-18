@@ -12,18 +12,20 @@ class Role:
     """Canonical QuantDB platform role constants."""
     USER = "USER"
     QUANT_TRADER = "QUANT_TRADER"
+    QUANT_DEVELOPER = "QUANT_DEVELOPER"
     QUANT_RESEARCHER = "QUANT_RESEARCHER"
     ADMIN = "ADMIN"
 
     # Legacy compatibility alias
     SIMULATED_TRADER = "SIMULATED_TRADER"
 
-    ALL_ROLES = [USER, QUANT_TRADER, QUANT_RESEARCHER, ADMIN]
+    ALL_ROLES = [USER, QUANT_TRADER, QUANT_DEVELOPER, QUANT_RESEARCHER, ADMIN]
 
 
 ROLE_DISPLAY_NAMES: Dict[str, str] = {
     Role.USER: "User",
     Role.QUANT_TRADER: "Quant Trader",
+    Role.QUANT_DEVELOPER: "Quant Developer",
     Role.QUANT_RESEARCHER: "Quant Researcher",
     Role.ADMIN: "Admin",
     Role.SIMULATED_TRADER: "Quant Trader",
@@ -44,6 +46,15 @@ ROLE_ALLOWED_PAGES: Dict[str, List[str]] = {
         "Trading",
         "Portfolio",
         "Strategies",
+        "Reports",
+    ],
+    Role.QUANT_DEVELOPER: [
+        "Overview",
+        "Market Data",
+        "Trading",
+        "Portfolio",
+        "Strategies",
+        "Backtesting",
         "Reports",
     ],
     Role.QUANT_RESEARCHER: [
@@ -100,19 +111,19 @@ def has_page_access(role: str, page_name: str) -> bool:
 def can_trade(role: str) -> bool:
     """Checks whether the role is permitted to perform simulated paper trading."""
     canon = normalize_role(role)
-    return canon in (Role.QUANT_TRADER, Role.ADMIN)
+    return canon in (Role.QUANT_TRADER, Role.QUANT_DEVELOPER, Role.ADMIN)
 
 
 def can_backtest(role: str) -> bool:
     """Checks whether the role is permitted to execute strategy backtests."""
     canon = normalize_role(role)
-    return canon in (Role.QUANT_RESEARCHER, Role.ADMIN)
+    return canon in (Role.QUANT_RESEARCHER, Role.QUANT_DEVELOPER, Role.ADMIN)
 
 
 def can_manage_strategies(role: str) -> bool:
     """Checks whether the role is permitted to create and modify quantitative strategies."""
     canon = normalize_role(role)
-    return canon in (Role.QUANT_RESEARCHER, Role.ADMIN)
+    return canon in (Role.QUANT_RESEARCHER, Role.QUANT_DEVELOPER, Role.ADMIN)
 
 
 def can_manage_users(role: str) -> bool:

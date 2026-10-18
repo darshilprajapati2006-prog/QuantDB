@@ -48,6 +48,20 @@ class MockProvider:
         return get_securities_list()
 
     def get_users(self) -> List[Dict]:
+        try:
+            from src.database.repository import Repository
+            repo = Repository()
+            users = repo.get_users()
+            if users:
+                res = []
+                for u in users:
+                    ud = dict(u)
+                    if "created_at" in ud and ud["created_at"]:
+                        ud["created_at"] = str(ud["created_at"])
+                    res.append(ud)
+                return res
+        except Exception:
+            pass
         return [
             {"user_id": 1, "username": "admin01", "name": "Darshil Prajapati", "email": "darshil@quantdb.local", "role": "ADMIN", "status": "ACTIVE", "is_verified": True, "created_at": "2024-01-01 00:00:00"},
             {"user_id": 2, "username": "researcher01", "name": "Bharat", "email": "bharat@quantdb.local", "role": "QUANT_RESEARCHER", "status": "ACTIVE", "is_verified": True, "created_at": "2024-01-05 10:15:00"},

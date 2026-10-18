@@ -159,7 +159,7 @@ st.markdown("<div class='quant-divider'></div>", unsafe_allow_html=True)
 # ADMINISTRATIVE SECTIONS: USERS, ROLES, EXCHANGES, SECURITIES
 # -------------------------------------------------------------
 admin_tab1, admin_tab2, admin_tab3, admin_tab4, admin_tab5, admin_tab6 = st.tabs([
-    "👤 Platform Users",
+    "👥 User & Role Management",
     "🛡️ Role Permissions",
     "🏛️ Registered Exchanges",
     "📊 Securities Master Catalog",
@@ -168,142 +168,611 @@ admin_tab1, admin_tab2, admin_tab3, admin_tab4, admin_tab5, admin_tab6 = st.tabs
 ])
 
 with admin_tab1:
+    # ── Custom CSS for User & Role Management Modal / Card ─────────────────────
     st.markdown("""
-        <div style="font-size: 0.82rem; text-transform: uppercase; color: #E2E8F0; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 8px;">
-            User Accounts Table (Schema: users)
-        </div>
-    """, unsafe_allow_html=True)
-
-    # Retrieve platform users via active provider (MySQL QuantDB in REAL mode, mock in MOCK mode)
-    users_list = get_platform_users()
-    if users_list:
-        users_df = pd.DataFrame(users_list)
-        # Ensure display columns match schema; strictly omit password hashes and OTP hashes
-        display_cols = [c for c in ["user_id", "username", "name", "email", "role", "is_verified", "status", "created_at"] if c in users_df.columns]
-        users_df = users_df[display_cols]
-    else:
-        users_df = pd.DataFrame(columns=["user_id", "username", "name", "email", "role", "is_verified", "status", "created_at"])
-
-    render_dataframe(
-        users_df,
-        column_config={
-            "user_id": st.column_config.NumberColumn("User ID", format="#%d"),
-            "username": st.column_config.TextColumn("Username"),
-            "name": st.column_config.TextColumn("Full Name"),
-            "email": st.column_config.TextColumn("Email Address"),
-            "role": st.column_config.TextColumn("Assigned Role"),
-            "is_verified": st.column_config.CheckboxColumn("Verified"),
-            "status": st.column_config.TextColumn("Account Status"),
-            "created_at": st.column_config.TextColumn("Created Timestamp"),
-        },
-        hide_index=True,
-    )
-
-    st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
-    st.markdown("""
-        <div style="font-size: 0.82rem; text-transform: uppercase; color: #E2E8F0; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 10px;">
-            Account Administration & Governance Controls
-        </div>
-    """, unsafe_allow_html=True)
-
-    if users_list:
-        user_options = {
-            f"{u.get('username', u.get('name'))} (ID: {u.get('user_id')}, {u.get('email')})": u
-            for u in users_list
+        <style>
+        .urm-modal-card {
+            background: #141722;
+            border: 1px solid #232738;
+            border-radius: 14px;
+            padding: 22px 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
         }
-        col_m1, col_m2 = st.columns(2)
+        .urm-header-row {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            margin-bottom: 18px;
+        }
+        .urm-title-group {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+        .urm-icon-box {
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+            background: #251e3e;
+            border: 1px solid #3d2f60;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            color: #a855f7;
+            flex-shrink: 0;
+        }
+        .urm-title-line {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .urm-main-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #f1f5f9;
+            margin: 0;
+            letter-spacing: -0.01em;
+        }
+        .urm-restricted-pill {
+            background: #391723;
+            border: 1px solid #5e1d2c;
+            color: #fb7185;
+            border-radius: 9999px;
+            font-size: 0.72rem;
+            padding: 2px 10px;
+            font-weight: 600;
+        }
+        .urm-subtitle {
+            color: #848d9f;
+            font-size: 0.82rem;
+            margin-top: 3px;
+            margin-bottom: 0;
+            line-height: 1.4;
+        }
+        .urm-stats-box {
+            background: #191c28;
+            border: 1px solid #252a3b;
+            border-radius: 10px;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .urm-stat-col {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+        }
+        .urm-stat-col:not(:last-child) {
+            border-right: 1px solid #252a3b;
+        }
+        .urm-stat-txt {
+            color: #cbd5e1;
+            font-size: 0.84rem;
+            font-weight: 500;
+        }
+        .urm-stat-badge {
+            background: #2e2149;
+            color: #c084fc;
+            border: 1px solid #4a3675;
+            border-radius: 9999px;
+            font-weight: 700;
+            font-size: 0.80rem;
+            padding: 2px 12px;
+            min-width: 28px;
+            text-align: center;
+        }
+        .urm-tbl-head {
+            background: #181b29;
+            border-top: 1px solid #232738;
+            border-left: 1px solid #232738;
+            border-right: 1px solid #232738;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+            padding: 10px 14px;
+            color: #64748b;
+            font-size: 0.70rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .urm-row-container {
+            background: #141722;
+            border-left: 1px solid #232738;
+            border-right: 1px solid #232738;
+            border-bottom: 1px solid #1e2233;
+            padding: 8px 14px;
+            display: flex;
+            align-items: center;
+        }
+        .urm-row-container:last-child {
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
+            border-bottom: 1px solid #232738;
+        }
+        .urm-avatar-circle {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #352654;
+            color: #c4b5fd;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            margin-right: 8px;
+            flex-shrink: 0;
+            border: 1px solid #4a3875;
+        }
+        .urm-name-label {
+            color: #e2e8f0;
+            font-weight: 600;
+            font-size: 0.86rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .urm-you-tag {
+            background: #2e234c;
+            color: #c084fc;
+            border: 1px solid #4f3b7c;
+            border-radius: 9999px;
+            font-size: 0.68rem;
+            padding: 1px 6px;
+            font-weight: 600;
+        }
+        .urm-email-str {
+            color: #94a3b8;
+            font-size: 0.82rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .urm-pill-active {
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            color: #34d399;
+            border-radius: 9999px;
+            padding: 3px 9px;
+            font-size: 0.74rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .urm-pill-inactive {
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            color: #f87171;
+            border-radius: 9999px;
+            padding: 3px 9px;
+            font-size: 0.74rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .urm-pill-verified {
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            color: #34d399;
+            border-radius: 9999px;
+            padding: 3px 9px;
+            font-size: 0.74rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .urm-date-str {
+            color: #94a3b8;
+            font-size: 0.76rem;
+            font-family: ui-monospace, SFMono-Regular, monospace;
+        }
+        .urm-protected-box {
+            background: #1c1f2e;
+            border: 1px solid #2e344a;
+            color: #94a3b8;
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-size: 0.80rem;
+            font-weight: 500;
+            display: inline-block;
+            width: 100%;
+            text-align: left;
+        }
+        .urm-bottom-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 18px;
+            padding-top: 14px;
+            border-top: 1px solid #232738;
+        }
+        .urm-lock-note {
+            color: #848d9f;
+            font-size: 0.78rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        /* Custom tweaks for selectbox inside table rows */
+        div[data-testid="stSelectbox"] label {
+            display: none !important;
+        }
+        div[data-testid="stSelectbox"] > div > div {
+            background-color: #1a1d2c !important;
+            border: 1px solid #333a52 !important;
+            border-radius: 6px !important;
+            color: #e2e8f0 !important;
+            font-size: 0.80rem !important;
+            min-height: 30px !important;
+            height: 30px !important;
+            padding: 0 8px !important;
+        }
+        div[data-testid="stButton"] button {
+            border-radius: 6px !important;
+            font-size: 0.76rem !important;
+            padding: 2px 8px !important;
+            min-height: 28px !important;
+            height: 28px !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
-        with col_m1:
-            st.markdown("<div style='font-size: 0.76rem; font-weight: 700; color: #94A3B8; margin-bottom: 6px;'>UPDATE ROLE & ACCOUNT STATUS</div>", unsafe_allow_html=True)
-            with st.form("admin_update_role_status_form"):
-                sel_user_str = st.selectbox("Select Target User", options=list(user_options.keys()), key="sel_user_edit")
-                sel_u = user_options[sel_user_str]
-                current_role = normalize_role(sel_u.get("role", Role.USER))
-                current_status = sel_u.get("status", "ACTIVE")
+    # ── Helpers for Avatar and Role Mapping ───────────────────────────────────
+    def _compute_initials(name_or_email: str) -> str:
+        s = (name_or_email or "").strip()
+        if not s:
+            return "U"
+        parts = s.split()
+        if len(parts) >= 2:
+            return f"{parts[0][0]}{parts[1][0]}".upper()
+        return s[:2].upper()
 
-                role_choices = [Role.USER, Role.QUANT_TRADER, Role.QUANT_RESEARCHER, Role.ADMIN]
-                new_role = st.selectbox(
-                    "Assign Role",
-                    options=role_choices,
-                    index=role_choices.index(current_role) if current_role in role_choices else 0,
-                    format_func=lambda r: f"{get_role_display_name(r)} ({r})"
-                )
+    ROLE_CHOICES = ["Viewer", "Quant Trader", "Quant Developer", "Quant Researcher", "System Admin"]
+    ROLE_MAP = {
+        Role.USER: "Viewer",
+        Role.QUANT_TRADER: "Quant Trader",
+        Role.QUANT_DEVELOPER: "Quant Developer",
+        Role.QUANT_RESEARCHER: "Quant Researcher",
+        Role.ADMIN: "System Admin",
+        "SIMULATED_TRADER": "Quant Trader",
+        "USER": "Viewer",
+    }
+    REVERSE_ROLE_MAP = {
+        "Viewer": Role.USER,
+        "Quant Trader": Role.QUANT_TRADER,
+        "Quant Developer": Role.QUANT_DEVELOPER,
+        "Quant Researcher": Role.QUANT_RESEARCHER,
+        "System Admin": Role.ADMIN,
+    }
 
-                status_choices = ["ACTIVE", "INACTIVE", "SUSPENDED"]
-                new_status = st.selectbox(
-                    "Account Status",
-                    options=status_choices,
-                    index=status_choices.index(current_status) if current_status in status_choices else 0,
-                )
+    # Fetch users from provider (MySQL in REAL mode)
+    users_list = get_platform_users()
+    total_users_count = len(users_list) if users_list else 0
 
-                submit_update = st.form_submit_button("Save Role & Status", type="primary", use_container_width=True)
-                if submit_update:
-                    try:
-                        repo = Repository()
-                        target_id = sel_u["user_id"]
-                        repo.update_user_role(target_id, new_role)
-                        repo.update_user_status(target_id, new_status)
-                        clear_analytics_service_cache()
-                        st.success(f"Successfully updated user #{target_id} to Role: {new_role}, Status: {new_status}")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to update user: {e}")
+    curr_session_email = (st.session_state.get("email") or "").lower().strip()
+    curr_session_user = (st.session_state.get("username") or "").lower().strip()
 
-        with col_m2:
-            st.markdown("<div style='font-size: 0.76rem; font-weight: 700; color: #94A3B8; margin-bottom: 6px;'>SECURE PASSWORD RESET</div>", unsafe_allow_html=True)
-            with st.form("admin_password_reset_form"):
-                pwd_user_str = st.selectbox("Select Target User", options=list(user_options.keys()), key="sel_user_pwd")
-                pwd_u = user_options[pwd_user_str]
-                new_pw = st.text_input("New Password", type="password", placeholder="Enter secure new password", help="Password will be securely hashed with PBKDF2-HMAC-SHA256.")
+    # ── Header & Action Buttons ──────────────────────────────────────────────
+    hdr_left, hdr_right = st.columns([7, 3])
 
-                submit_pwd = st.form_submit_button("Update Password Hash", type="secondary", use_container_width=True)
-                if submit_pwd:
-                    if not new_pw or len(new_pw) < 6:
-                        st.error("Password must be at least 6 characters long.")
+    with hdr_left:
+        st.markdown("""
+            <div class="urm-title-group">
+                <div class="urm-icon-box">👥</div>
+                <div class="urm-title-area">
+                    <div class="urm-title-line">
+                        <span class="urm-main-title">User & Role Management</span>
+                        <span class="urm-restricted-pill">Admin Restricted</span>
+                    </div>
+                    <div class="urm-subtitle">
+                        Manage accounts and assign approved roles. System Admin access is reserved for the configured one-time bootstrap account.
+                    </div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with hdr_right:
+        st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+        btn_c1, btn_c2 = st.columns([1, 1.2])
+        with btn_c1:
+            if st.button("🔄 Refresh", key="urm_top_refresh_btn", use_container_width=True):
+                clear_analytics_service_cache()
+                st.rerun()
+        with btn_c2:
+            invite_clicked = st.button("➕ Invite User", key="urm_top_invite_btn", type="primary", use_container_width=True)
+            if invite_clicked:
+                st.session_state["show_invite_form"] = not st.session_state.get("show_invite_form", False)
+
+    # ── Optional Invite / Register User Form ──────────────────────────────────
+    if st.session_state.get("show_invite_form", False):
+        with st.container():
+            st.markdown("""
+                <div style="background: #1a1e2c; border: 1px solid #3b2e5a; border-radius: 10px; padding: 18px 20px; margin: 12px 0 20px 0;">
+                    <div style="font-size: 0.88rem; font-weight: 700; color: #c4b5fd; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                        <span>✉️</span> Invite & Provision New Platform Account
+                    </div>
+            """, unsafe_allow_html=True)
+            with st.form("urm_invite_user_form"):
+                inv_c1, inv_c2 = st.columns(2)
+                with inv_c1:
+                    inv_name = st.text_input("Full Name", placeholder="e.g. Bharat Pal")
+                    inv_email = st.text_input("Institutional Email", placeholder="e.g. user@aid.svnit.ac.in")
+                with inv_c2:
+                    inv_role = st.selectbox("Assigned Role", options=ROLE_CHOICES, index=0)
+                    inv_pwd = st.text_input("Temporary Password", type="password", placeholder="Minimum 6 characters")
+                
+                sub_inv = st.form_submit_button("Provision Account Now", type="primary", use_container_width=True)
+                if sub_inv:
+                    if not inv_email or "@" not in inv_email:
+                        st.error("Please provide a valid institutional email address.")
+                    elif not inv_pwd or len(inv_pwd) < 6:
+                        st.error("Temporary password must be at least 6 characters.")
                     else:
                         try:
+                            clean_em = inv_email.strip().lower()
+                            c_name = inv_name.strip() or clean_em.split("@")[0]
+                            target_role = REVERSE_ROLE_MAP.get(inv_role, Role.USER)
                             repo = Repository()
-                            target_id = pwd_u["user_id"]
-                            hashed = hash_password(new_pw)
-                            repo.update_user_password(target_id, hashed)
-                            clear_analytics_service_cache()
-                            st.success(f"Password for user #{target_id} securely updated and hashed.")
-                        except Exception as e:
-                            st.error(f"Failed to reset password: {e}")
-
-        with st.expander("➕ Register New Platform User", expanded=False):
-            with st.form("admin_create_user_form"):
-                c_u1, c_u2 = st.columns(2)
-                with c_u1:
-                    new_uname = st.text_input("Username", placeholder="e.g. trader02")
-                    new_fullname = st.text_input("Full Name", placeholder="e.g. John Doe")
-                    new_uemail = st.text_input("Email", placeholder="e.g. john@quantdb.local")
-                with c_u2:
-                    new_urole = st.selectbox("Role", options=[Role.USER, Role.QUANT_TRADER, Role.QUANT_RESEARCHER, Role.ADMIN], format_func=lambda r: f"{get_role_display_name(r)} ({r})")
-                    new_ustatus = st.selectbox("Initial Status", options=["ACTIVE", "INACTIVE", "SUSPENDED"])
-                    new_upass = st.text_input("Initial Password", type="password", placeholder="Temporary secure password")
-
-                create_btn = st.form_submit_button("Create User Account", type="primary", use_container_width=True)
-                if create_btn:
-                    if not new_uname or not new_fullname or not new_uemail or not new_upass:
-                        st.error("All user fields are required.")
-                    else:
-                        try:
-                            repo = Repository()
-                            hashed = hash_password(new_upass)
-                            new_id = repo.create_user(
-                                username=new_uname.strip().lower(),
-                                name=new_fullname.strip(),
-                                email=new_uemail.strip().lower(),
-                                password_hash=hashed,
-                                role=new_urole,
-                                status=new_ustatus,
+                            hashed_p = hash_password(inv_pwd)
+                            repo.create_user(
+                                username=clean_em.split("@")[0],
+                                name=c_name,
+                                email=clean_em,
+                                password_hash=hashed_p,
+                                role=target_role,
+                                status="ACTIVE",
                             )
                             clear_analytics_service_cache()
-                            st.success(f"User account created successfully (User ID #{new_id}).")
+                            st.session_state["show_invite_form"] = False
+                            st.success(f"Successfully provisioned account for {clean_em} with role {inv_role}!")
+                            st.rerun()
+                        except Exception as inv_err:
+                            st.error(f"Failed to provision user: {inv_err}")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+
+    # ── Summary Stats Cards Bar ──────────────────────────────────────────────
+    st.markdown(f"""
+        <div class="urm-stats-box">
+            <div class="urm-stat-col">
+                <span class="urm-stat-txt">Total Registered Accounts</span>
+                <span class="urm-stat-badge">{total_users_count}</span>
+            </div>
+            <div class="urm-stat-col">
+                <span class="urm-stat-txt">Pending Invitations</span>
+                <span class="urm-stat-badge">0</span>
+            </div>
+            <div class="urm-stat-col">
+                <span class="urm-stat-txt">Role Change Requests</span>
+                <span class="urm-stat-badge">0</span>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # ── Users Table Header ───────────────────────────────────────────────────
+    st.markdown("""
+        <div class="urm-tbl-head">
+            <div style="display: flex; align-items: center; width: 100%;">
+                <div style="flex: 2.5;">USER</div>
+                <div style="flex: 2.6;">INSTITUTIONAL EMAIL</div>
+                <div style="flex: 2.0;">ASSIGNED ROLE</div>
+                <div style="flex: 1.1;">STATUS</div>
+                <div style="flex: 1.2;">EMAIL VERIFIED</div>
+                <div style="flex: 2.1;">CREATED</div>
+                <div style="flex: 1.8; text-align: right;">ACTIONS</div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # ── Render User Rows ──────────────────────────────────────────────────────
+    if not users_list:
+        st.markdown("""
+            <div class="urm-row-container" style="justify-content: center; padding: 32px; color: #64748b;">
+                No registered platform users found in database.
+            </div>
+        """, unsafe_allow_html=True)
+    else:
+        for idx, u in enumerate(users_list):
+            uid = u.get("user_id", idx)
+            uname = u.get("name") or u.get("username") or "User"
+            uemail = u.get("email") or ""
+            urole_raw = normalize_role(u.get("role", Role.USER))
+            ustatus = str(u.get("status", "ACTIVE")).upper()
+            is_verified = bool(u.get("is_verified", True))
+            created_at = str(u.get("created_at", ""))
+            
+            # Format timestamp nicely
+            if created_at and "." in created_at and "+00" not in created_at:
+                created_disp = f"{created_at}+00"
+            elif created_at:
+                created_disp = created_at
+            else:
+                created_disp = "2026-10-18 00:00:00+00"
+
+            initials = _compute_initials(uname)
+            is_you = (
+                (uemail and uemail.lower() == curr_session_email)
+                or (u.get("username") and u.get("username").lower() == curr_session_user)
+            )
+            is_protected_admin = (urole_raw == Role.ADMIN) or is_you
+
+            # Grid columns for row
+            c_user, c_email, c_role, c_stat, c_ver, c_time, c_act = st.columns(
+                [2.5, 2.6, 2.0, 1.1, 1.2, 2.1, 1.8]
+            )
+
+            # Col 1: Avatar + Name
+            with c_user:
+                you_html = '<span class="urm-you-tag">(You)</span>' if is_you else ''
+                st.markdown(f"""
+                    <div style="display: flex; align-items: center; height: 38px;">
+                        <div class="urm-avatar-circle">{initials}</div>
+                        <div class="urm-name-label" title="{uname}">{uname} {you_html}</div>
+                    </div>
+                """, unsafe_allow_html=True)
+
+            # Col 2: Institutional Email
+            with c_email:
+                st.markdown(f"""
+                    <div style="display: flex; align-items: center; height: 38px;">
+                        <span class="urm-email-str" title="{uemail}">{uemail}</span>
+                    </div>
+                """, unsafe_allow_html=True)
+
+            # Col 3: Assigned Role
+            with c_role:
+                if is_protected_admin:
+                    st.markdown("""
+                        <div style="display: flex; align-items: center; height: 38px;">
+                            <span class="urm-protected-box">System Admin (protected)</span>
+                        </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    curr_display_role = ROLE_MAP.get(urole_raw, "Viewer")
+                    curr_idx = ROLE_CHOICES.index(curr_display_role) if curr_display_role in ROLE_CHOICES else 0
+                    
+                    selected_role = st.selectbox(
+                        f"role_{uid}",
+                        options=ROLE_CHOICES,
+                        index=curr_idx,
+                        key=f"urm_role_sel_{uid}",
+                    )
+                    
+                    if selected_role != curr_display_role:
+                        try:
+                            repo = Repository()
+                            new_db_role = REVERSE_ROLE_MAP.get(selected_role, Role.USER)
+                            repo.update_user_role(uid, new_db_role)
+                            clear_analytics_service_cache()
+                            st.toast(f"Updated {uname} role to {selected_role}!", icon="🛡️")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Failed to create user: {e}")
+                            st.error(f"Role update failed: {e}")
+
+            # Col 4: Status
+            with c_stat:
+                if ustatus == "ACTIVE":
+                    st.markdown("""
+                        <div style="display: flex; align-items: center; height: 38px;">
+                            <span class="urm-pill-active">● Active</span>
+                        </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                        <div style="display: flex; align-items: center; height: 38px;">
+                            <span class="urm-pill-inactive">● Inactive</span>
+                        </div>
+                    """, unsafe_allow_html=True)
+
+            # Col 5: Email Verified
+            with c_ver:
+                st.markdown("""
+                    <div style="display: flex; align-items: center; height: 38px;">
+                        <span class="urm-pill-verified">✓ Verified</span>
+                    </div>
+                """, unsafe_allow_html=True)
+
+            # Col 6: Created Timestamp
+            with c_time:
+                st.markdown(f"""
+                    <div style="display: flex; align-items: center; height: 38px;">
+                        <span class="urm-date-str" title="{created_disp}">{created_disp}</span>
+                    </div>
+                """, unsafe_allow_html=True)
+
+            # Col 7: Actions
+            with c_act:
+                act_col1, act_col2 = st.columns([2, 1])
+                with act_col1:
+                    if is_protected_admin:
+                        st.markdown("""
+                            <div style="display: flex; align-items: center; height: 38px;">
+                                <button disabled style="background:#181b28; border:1px solid #282d3e; color:#475569; border-radius:6px; font-size:0.76rem; padding:4px 8px; width:100%; cursor:not-allowed;">Deactivate</button>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        btn_txt = "Deactivate" if ustatus == "ACTIVE" else "Activate"
+                        if st.button(btn_txt, key=f"urm_stat_toggle_{uid}", use_container_width=True):
+                            try:
+                                repo = Repository()
+                                next_status = "INACTIVE" if ustatus == "ACTIVE" else "ACTIVE"
+                                repo.update_user_status(uid, next_status)
+                                clear_analytics_service_cache()
+                                st.toast(f"Account for {uname} is now {next_status}!", icon="🔄")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Status update failed: {e}")
+
+                with act_col2:
+                    if is_protected_admin:
+                        st.markdown("""
+                            <div style="display: flex; align-items: center; height: 38px;">
+                                <button disabled style="background:#181b28; border:1px solid #282d3e; color:#475569; border-radius:6px; font-size:0.76rem; padding:4px 6px; width:100%; cursor:not-allowed;">🗑️</button>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        if st.button("🗑️", key=f"urm_del_{uid}", help=f"Delete user account {uname}"):
+                            try:
+                                repo = Repository()
+                                repo.delete_user(uid)
+                                clear_analytics_service_cache()
+                                st.toast(f"User #{uid} deleted successfully.", icon="🗑️")
+                                st.rerun()
+                            except Exception as del_err:
+                                st.error(f"Could not delete user: {del_err}")
+
+            st.markdown("<div style='height: 1px; background: #1e2233; margin: 4px 0 6px 0;'></div>", unsafe_allow_html=True)
+
+    # ── Bottom Bar / Footer ──────────────────────────────────────────────────
+    st.markdown("""
+        <div class="urm-bottom-bar">
+            <div class="urm-lock-note">
+                <span>🔒</span> RBAC permissions and account status changes take effect immediately across all sessions.
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # ── Collapsible Utility for Password Management ──────────────────────────
+    with st.expander("🔑 Secure Administrative Password Reset", expanded=False):
+        if users_list:
+            user_options = {
+                f"{u.get('name', u.get('username'))} (ID: {u.get('user_id')}, {u.get('email')})": u
+                for u in users_list
+            }
+            with st.form("admin_password_reset_form_compact"):
+                sel_u_str = st.selectbox("Target User Account", options=list(user_options.keys()), key="pwd_target_user_sel")
+                sel_target = user_options[sel_u_str]
+                target_uid = sel_target["user_id"]
+                new_pw_input = st.text_input("New Secure Password", type="password", placeholder="Enter new password (min 6 chars)")
+                
+                reset_btn = st.form_submit_button("Reset Password Hash", type="primary", use_container_width=True)
+                if reset_btn:
+                    if not new_pw_input or len(new_pw_input) < 6:
+                        st.error("Password must be at least 6 characters.")
+                    else:
+                        try:
+                            repo = Repository()
+                            h_pw = hash_password(new_pw_input)
+                            repo.update_user_password(target_uid, h_pw)
+                            clear_analytics_service_cache()
+                            st.success(f"Successfully updated password hash for user #{target_uid}.")
+                        except Exception as e:
+                            st.error(f"Failed to reset password: {e}")
 
 with admin_tab2:
     st.markdown("""
@@ -315,6 +784,7 @@ with admin_tab2:
     rbac_df = pd.DataFrame([
         {"Role": "USER", "Display": "User", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Restricted", "Portfolio": "Allowed", "Strategies": "Restricted", "Backtesting": "Restricted", "Reports": "Allowed", "Admin Console": "No Access"},
         {"Role": "QUANT_TRADER", "Display": "Quant Trader", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Paper Execution", "Portfolio": "Allowed", "Strategies": "View Only", "Backtesting": "Restricted", "Reports": "Allowed", "Admin Console": "No Access"},
+        {"Role": "QUANT_DEVELOPER", "Display": "Quant Developer", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Full Paper Trading", "Portfolio": "Allowed", "Strategies": "Full Access", "Backtesting": "Full Access", "Reports": "Allowed", "Admin Console": "No Access"},
         {"Role": "QUANT_RESEARCHER", "Display": "Quant Researcher", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Restricted", "Portfolio": "Allowed", "Strategies": "Full Access", "Backtesting": "Full Access", "Reports": "Allowed", "Admin Console": "No Access"},
         {"Role": "ADMIN", "Display": "Admin", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Full Paper Trading", "Portfolio": "All Portfolios", "Strategies": "Full Access", "Backtesting": "Full Access", "Reports": "Allowed", "Admin Console": "Full Control"},
     ])

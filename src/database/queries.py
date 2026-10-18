@@ -75,13 +75,20 @@ LIMIT 1;
 GET_ALL_USERS = """
 SELECT
     user_id,
+    username,
     name,
     email,
     role,
     status,
+    is_verified,
     created_at
 FROM users
-ORDER BY user_id;
+ORDER BY user_id DESC;
+"""
+
+DELETE_USER = """
+DELETE FROM users
+WHERE user_id = %s;
 """
 
 UPDATE_USER_ROLE = """
@@ -118,13 +125,19 @@ WHERE user_id = %s;
 
 CREATE_USER = """
 INSERT INTO users (
+    username,
     name,
     email,
     password_hash,
     role,
     status,
+    is_verified,
     created_at
-) VALUES (%s, %s, %s, %s, %s, %s);
+) VALUES (%s, %s, %s, %s, %s, %s, 1, %s)
+ON DUPLICATE KEY UPDATE
+    name = VALUES(name),
+    status = 'ACTIVE',
+    is_verified = 1;
 """
 
 # ============================================================
@@ -1162,9 +1175,10 @@ def create_user(
             resolved_role = kwargs.get("role", resolved_role)
             resolved_status = kwargs.get("status", resolved_status)
 
+        uname = kwargs.get("username") or (resolved_email.split("@")[0] if "@" in resolved_email else resolved_name)
         cursor.execute(
             CREATE_USER,
-            (resolved_name, resolved_email, resolved_hash, resolved_role, resolved_status, now),
+            (uname, resolved_name, resolved_email, resolved_hash, resolved_role, resolved_status, now),
         )
         conn.commit()
         return cursor.lastrowid
