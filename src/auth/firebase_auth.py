@@ -38,8 +38,24 @@ def _firebase_error(response: requests.Response) -> str:
     return str(message)
 
 
+def _has_admin_credentials() -> bool:
+    """Fast check whether server-side Firebase Admin credentials exist."""
+    if _config("FIREBASE_SERVICE_ACCOUNT_JSON"):
+        return True
+    path = _config("FIREBASE_SERVICE_ACCOUNT_PATH") or _config("GOOGLE_APPLICATION_CREDENTIALS")
+    if path and os.path.isfile(path):
+        return True
+    for candidate in ["serviceAccountKey.json", "service_account.json", "firebase_service_account.json"]:
+        if os.path.isfile(candidate):
+            return True
+    return False
+
+
 def _get_admin_app(project_id: str):
-    """Initialize or retrieve the Firebase Admin application."""
+    """Initialize or retrieve the Firebase Admin application without hanging on missing ADC."""
+    if not _has_admin_credentials():
+        return None
+
     import firebase_admin
     from firebase_admin import credentials
 
@@ -51,7 +67,6 @@ def _get_admin_app(project_id: str):
     service_account_json = _config("FIREBASE_SERVICE_ACCOUNT_JSON")
     service_account_path = _config("FIREBASE_SERVICE_ACCOUNT_PATH") or _config("GOOGLE_APPLICATION_CREDENTIALS")
 
-    # Check for local service account file candidates if not set
     if not service_account_path:
         for candidate in ["serviceAccountKey.json", "service_account.json", "firebase_service_account.json"]:
             if os.path.isfile(candidate):
@@ -64,7 +79,7 @@ def _get_admin_app(project_id: str):
     elif service_account_path and os.path.isfile(service_account_path):
         credential = credentials.Certificate(service_account_path)
     else:
-        credential = credentials.ApplicationDefault()
+        return None
 
     return firebase_admin.initialize_app(credential, {"projectId": project_id})
 
@@ -126,16 +141,17 @@ def sign_up(email: str, password: str, display_name: str = "") -> Dict[str, Any]
             logger.warning("Firebase email verification dispatch failed: %s", mail_exc)
 
     # Record initial role in Firestore if admin is configured
-    project_id = _config("FIREBASE_PROJECT_ID", "quantdb-728ef")
-    try:
-        import firebase_admin
-        from firebase_admin import firestore
+    if _has_admin_credentials():
+        project_id = _config("FIREBASE_PROJECT_ID", "quantdb-728ef")
+        try:
+            from firebase_admin import firestore
 
-        app = _get_admin_app(project_id)
-        db = firestore.client(app=app)
-        db.collection("user_roles").document(uid).set({"role": "USER", "name": name}, merge=True)
-    except Exception as exc:
-        logger.debug("Initial Firestore user_roles write skipped or failed: %s", exc)
+            app = _get_admin_app(project_id)
+            if app:
+                db = firestore.client(app=app)
+                db.collection("user_roles").document(uid).set({"role": "USER", "name": name}, merge=True)
+        except Exception as exc:
+            logger.debug("Initial Firestore user_roles write skipped or failed: %s", exc)
 
     return {
         "user_id": uid,
@@ -216,27 +232,29 @@ def authenticate(identifier: str, password: str) -> Dict[str, Any]:
 
     # Firebase Admin verifies the ID token and accesses Firestore with server
     # credentials. Never trust role values supplied by the client.
-    try:
-        import firebase_admin
-        from firebase_admin import auth as admin_auth, firestore
+    if _has_admin_credentials():
+        try:
+            from firebase_admin import auth as admin_auth, firestore
 
-        app = _get_admin_app(project_id)
-        admin_auth.verify_id_token(auth["idToken"], app=app)
-        profile = firestore.client(app=app).collection("user_roles").document(uid).get()
-        if profile.exists:
-            data = profile.to_dict() or {}
-            role = normalize_role(data.get("role", Role.USER))
-            name = data.get("name") or name
-    except ImportError:
-        # Without Admin SDK, sign-in remains safe at USER permissions only.
-        pass
-    except Exception as exc:
-        # If Admin credentials are not yet configured or fail, log warning and allow
-        # authenticated Firebase user access at default USER permissions.
-        logger.warning(
-            "Firebase Admin/Firestore verification not available (%s). Defaulting to USER role.",
-            exc,
-        )
+            app = _get_admin_app(project_id)
+            if app:
+                admin_auth.verify_id_token(auth["idToken"], app=app)
+                profile = firestore.client(app=app).collection("user_roles").document(uid).get()
+                if profile.exists:
+                    data = profile.to_dict() or {}
+                    role = normalize_role(data.get("role", Role.USER))
+                    name = data.get("name") or name
+        except ImportError:
+            # Without Admin SDK, sign-in remains safe at USER permissions only.
+            pass
+        except Exception as exc:
+            # If Admin credentials fail, log warning and allow
+            # authenticated Firebase user access at default USER permissions.
+            logger.warning(
+                "Firebase Admin/Firestore verification not available (%s). Defaulting to USER role.",
+                exc,
+            )
+
 
     return {
         "user_id": uid,

@@ -167,12 +167,16 @@ def login(identifier: str, password: str) -> Tuple[bool, str]:
             st.session_state["auth_screen"] = "signin"
             st.session_state["pending_verification"] = None
 
-            # Dispatch security login alert email to user
-            try:
-                from src.auth.email_service import send_login_alert_email
-                send_login_alert_email(to_email=user_info["email"], user_name=user_info.get("name", ""))
-            except Exception as mail_err:
-                logger.warning(f"Could not dispatch login alert email: {mail_err}")
+            # Dispatch security login alert email to user asynchronously
+            import threading
+            def _async_mail_fb(to_email, u_name):
+                try:
+                    from src.auth.email_service import send_login_alert_email
+                    send_login_alert_email(to_email=to_email, user_name=u_name)
+                except Exception as mail_err:
+                    logger.warning(f"Could not dispatch login alert email: {mail_err}")
+
+            threading.Thread(target=_async_mail_fb, args=(user_info["email"], user_info.get("name", "")), daemon=True).start()
 
             return True, "Authentication successful."
         except firebase_auth.FirebaseAuthError as e:
@@ -197,12 +201,16 @@ def login(identifier: str, password: str) -> Tuple[bool, str]:
         st.session_state["auth_screen"] = "signin"
         st.session_state["pending_verification"] = None
 
-        # Dispatch security login alert email to user
-        try:
-            from src.auth.email_service import send_login_alert_email
-            send_login_alert_email(to_email=user_info["email"], user_name=user_info.get("name", ""))
-        except Exception as mail_err:
-            logger.warning(f"Could not dispatch login alert email: {mail_err}")
+        # Dispatch security login alert email to user asynchronously
+        import threading
+        def _async_mail_sql(to_email, u_name):
+            try:
+                from src.auth.email_service import send_login_alert_email
+                send_login_alert_email(to_email=to_email, user_name=u_name)
+            except Exception as mail_err:
+                logger.warning(f"Could not dispatch login alert email: {mail_err}")
+
+        threading.Thread(target=_async_mail_sql, args=(user_info["email"], user_info.get("name", "")), daemon=True).start()
 
         return True, "Authentication successful."
 
@@ -267,21 +275,29 @@ def signup(
             return False, "Passwords do not match."
         try:
             user_info = firebase_auth.sign_up(email=email, password=password, display_name=name)
-            # Sync user profile into local MySQL database without OTP
-            try:
-                repo = Repository()
-                existing = repo.get_user_by_email(email)
-                if not existing:
-                    from src.auth.password import hash_password
-                    repo.create_user(
-                        name=name or user_info.get("name", ""),
-                        email=email,
-                        password_hash=hash_password(password),
-                        role=Role.USER,
-                        status="ACTIVE",
-                    )
-            except Exception as sync_err:
-                logger.debug(f"MySQL user sync: {sync_err}")
+            # Sync user profile into local MySQL database asynchronously
+            def _async_sync_user(u_name, u_email, u_pwd):
+                try:
+                    repo = Repository()
+                    existing = repo.get_user_by_email(u_email)
+                    if not existing:
+                        from src.auth.password import hash_password
+                        repo.create_user(
+                            name=u_name,
+                            email=u_email,
+                            password_hash=hash_password(u_pwd),
+                            role=Role.USER,
+                            status="ACTIVE",
+                        )
+                except Exception as sync_err:
+                    logger.debug(f"MySQL user sync: {sync_err}")
+
+            import threading
+            threading.Thread(
+                target=_async_sync_user,
+                args=(name or user_info.get("name", ""), email, password),
+                daemon=True,
+            ).start()
 
             return True, f"Account created successfully! A verification email has been sent to {email} by Firebase. Please click the link in the email to verify, then log in."
         except firebase_auth.FirebaseAuthError as e:
