@@ -554,9 +554,28 @@ def render_login_screen() -> None:
             tab_signin, tab_signup = st.tabs(["SIGN IN", "CREATE ACCOUNT"])
 
             with tab_signin:
+                # Display professional registration & verification confirmation banner if just created
+                success_banner = st.session_state.get("auth_success_banner")
+                if success_banner:
+                    st.markdown(
+                        f"""
+                        <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.45); border-radius: 8px; padding: 16px 20px; margin-bottom: 20px;">
+                            <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: #34D399; font-size: 1.02rem; margin-bottom: 6px;">
+                                <span>✉️</span> Verification Email Dispatched
+                            </div>
+                            <div style="color: #E2E8F0; font-size: 0.88rem; line-height: 1.5;">
+                                {success_banner}
+                            </div>
+                        </div>
+                    """,
+                        unsafe_allow_html=True,
+                    )
+
                 with st.form("quantdb_login_form", clear_on_submit=False):
+                    prefill_mail = st.session_state.get("prefill_email") or ""
                     username_input = st.text_input(
                         "Email",
+                        value=prefill_mail,
                         placeholder="you@example.com",
                         help="Use the email address registered in Firebase Authentication.",
                     )
@@ -574,16 +593,44 @@ def render_login_screen() -> None:
                     if submit_btn:
                         success, msg = login(username_input, password_input)
                         if success:
+                            st.session_state["auth_success_banner"] = None
+                            st.session_state["prefill_email"] = None
+                            st.session_state["unverified_email_retry"] = None
                             st.success(
                                 f"Access granted. Welcome back, {st.session_state.get('display_name')}!"
                             )
                             st.rerun()
                         else:
-                            if st.session_state.get("auth_screen") == "verify":
+                            if "verify your email" in msg.lower():
+                                st.session_state["unverified_email_retry"] = username_input.strip()
+                                st.markdown(
+                                    f"""
+                                    <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.45); border-radius: 8px; padding: 14px 18px; margin-top: 14px; margin-bottom: 10px;">
+                                        <div style="color: #FBBF24; font-weight: 700; font-size: 0.92rem; margin-bottom: 4px;">
+                                            ⏳ Complete Email Verification
+                                        </div>
+                                        <div style="color: #CBD5E1; font-size: 0.84rem; line-height: 1.45;">
+                                            Your account has not been activated yet. A fresh verification link has been sent to <strong>{username_input}</strong>.<br>
+                                            ⚠️ <strong>Important:</strong> Please check your <strong>Inbox</strong> and <strong>Spam / Junk</strong> folder.
+                                        </div>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True,
+                                )
+                            elif st.session_state.get("auth_screen") == "verify":
                                 st.warning(msg)
                                 st.rerun()
                             else:
                                 st.error(f"Authentication Failed: {msg}")
+
+                if st.session_state.get("unverified_email_retry"):
+                    if st.button("🔄 Resend Verification Email", use_container_width=True):
+                        retry_mail = st.session_state.get("unverified_email_retry")
+                        r_ok, r_msg = firebase_auth.resend_verification_email(retry_mail)
+                        if r_ok:
+                            st.success(r_msg)
+                        else:
+                            st.error(r_msg)
 
             with tab_signup:
                 with st.form("quantdb_signup_form", clear_on_submit=False):
@@ -600,13 +647,13 @@ def render_login_screen() -> None:
                     reg_email = st.text_input(
                         "Email Address",
                         placeholder="e.g. aturing@cambridge.edu",
-                        help="A valid email address where you will receive a 6-digit verification code.",
+                        help="A valid, active email address where you will receive your verification link.",
                     )
                     reg_password = st.text_input(
                         "Password",
                         type="password",
                         placeholder="••••••••••••",
-                        help="Minimum 8 characters with both letters and numbers.",
+                        help="Minimum 6 characters for Firebase Authentication.",
                     )
                     reg_confirm_password = st.text_input(
                         "Confirm Password",
@@ -644,10 +691,33 @@ def render_login_screen() -> None:
                             phone=reg_phone,
                         )
                         if s_ok:
-                            st.success(s_msg)
+                            clean_mail = reg_email.strip()
+                            st.session_state["prefill_email"] = clean_mail
+                            st.session_state["auth_success_banner"] = (
+                                f"Account created successfully for <strong>{clean_mail}</strong>!<br>"
+                                "An activation link has been sent to your email. "
+                                "Please check your <strong>Inbox</strong> (and <strong>Spam / Junk</strong> folder) and complete verification.<br>"
+                                "Once verified, enter your password below to sign in."
+                            )
+                            # Automatically redirect user to the SIGN IN tab!
                             st.rerun()
                         else:
                             st.error(s_msg)
+                            if "already exists" in s_msg.lower():
+                                st.markdown(
+                                    f"""
+                                    <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 10px 14px; margin-top: 8px; margin-bottom: 8px;">
+                                        <div style="color: #93C5FD; font-size: 0.83rem;">
+                                            An account with <strong>{reg_email}</strong> is already registered. If this is your account, switch to Sign In to log in or complete verification.
+                                        </div>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True,
+                                )
+                                if st.button("👉 Switch to Sign In with this Email", use_container_width=True, type="secondary"):
+                                    st.session_state["prefill_email"] = reg_email.strip()
+                                    st.rerun()
+
 
         # Demo Credentials Helper for Academic Evaluation
         with st.expander(

@@ -105,3 +105,25 @@ def test_send_login_alert_email_mock(monkeypatch):
     monkeypatch.setenv("DATA_MODE", "mock")
     sent = send_login_alert_email("trader@quantdb.internal", "Trader Alan")
     assert sent is True
+
+
+def test_validate_email_domain_rejects_fake():
+    from src.auth.email_service import validate_email_domain
+    valid, err = validate_email_domain("user@fake123notrealdomainxyz99.com")
+    assert valid is False
+    assert "does not exist" in err
+
+
+def test_sign_up_rejects_fake_domain_before_firebase(monkeypatch):
+    monkeypatch.setenv("FIREBASE_API_KEY", "test_key")
+    with pytest.raises(firebase_auth.FirebaseAuthError, match="does not exist"):
+        firebase_auth.sign_up("user@fake123notrealdomainxyz99.com", "Password123")
+
+
+def test_resend_verification_email(monkeypatch):
+    monkeypatch.setenv("FIREBASE_API_KEY", "test_key")
+    monkeypatch.setenv("DATA_MODE", "mock")
+    ok, msg = firebase_auth.resend_verification_email("trader@quantdb.internal")
+    assert ok is True
+    assert "dispatched" in msg
+
