@@ -53,18 +53,23 @@ render_sidebar(current_page="Portfolio")
 render_simulation_banner("Simulated Portfolio Valuation • Real-Time Mark-To-Market Accounting")
 
 # Page Header
-st.markdown("""
-    <div style="margin-bottom: 16px;">
-        <div style="display: flex; align-items: baseline; gap: 10px;">
-            <h1 style="margin: 0; font-size: 1.75rem; font-weight: 800; color: #F8FAFC;">
-                PORTFOLIO <span style="color: #06B6D4;">MANAGEMENT</span>
-            </h1>
-            <span style="color: #64748B; font-size: 0.90rem;">
-                Holdings, Capital Allocation & Performance Tracking
-            </span>
+port_hdr1, port_hdr2 = st.columns([8, 2])
+with port_hdr1:
+    st.markdown("""
+        <div style="margin-bottom: 16px;">
+            <div style="display: flex; align-items: baseline; gap: 10px;">
+                <h1 style="margin: 0; font-size: 1.75rem; font-weight: 800; color: #F8FAFC;">
+                    PORTFOLIO <span style="color: #06B6D4;">MANAGEMENT</span>
+                </h1>
+                <span style="color: #64748B; font-size: 0.90rem;">
+                    Holdings, Capital Allocation & Performance Tracking
+                </span>
+            </div>
         </div>
-    </div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+with port_hdr2:
+    if st.button("⚡ Trade / Buy & Sell", key="btn_trade_from_portfolio", type="primary", use_container_width=True):
+        st.switch_page("pages/trading.py")
 
 # -------------------------------------------------------------
 # TOP SELECTORS & CONTROLS

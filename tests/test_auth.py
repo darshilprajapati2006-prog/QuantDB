@@ -207,19 +207,19 @@ class TestRoleBasedAccessControl:
     """Validates authorization rules across the 4 canonical platform roles."""
 
     def test_user_role_permissions(self):
-        """USER role: Can view Overview, Market Data, Portfolio, Reports. Cannot trade, backtest, or admin."""
+        """USER role: Can view Overview, Market Data, Trading, Portfolio, Reports. Can trade. Cannot backtest or admin."""
         role = Role.USER
         assert has_page_access(role, "Overview") is True
         assert has_page_access(role, "Market Data") is True
+        assert has_page_access(role, "Trading") is True
         assert has_page_access(role, "Portfolio") is True
         assert has_page_access(role, "Reports") is True
 
-        assert has_page_access(role, "Trading") is False
         assert has_page_access(role, "Strategies") is False
         assert has_page_access(role, "Backtesting") is False
         assert has_page_access(role, "Admin") is False
 
-        assert can_trade(role) is False
+        assert can_trade(role) is True
         assert can_backtest(role) is False
         assert can_manage_strategies(role) is False
         assert can_manage_users(role) is False
@@ -259,6 +259,19 @@ class TestRoleBasedAccessControl:
         assert can_manage_strategies(role) is True
         assert can_manage_users(role) is False
 
+    def test_quant_developer_role_permissions(self):
+        """QUANT_DEVELOPER role: Can access Overview, Market Data, Trading, Portfolio, Strategies, Backtesting, Reports. Cannot access Admin."""
+        role = Role.QUANT_DEVELOPER
+        for page in ["Overview", "Market Data", "Trading", "Portfolio", "Strategies", "Backtesting", "Reports"]:
+            assert has_page_access(role, page) is True
+
+        assert has_page_access(role, "Admin") is False
+
+        assert can_trade(role) is True
+        assert can_backtest(role) is True
+        assert can_manage_strategies(role) is True
+        assert can_manage_users(role) is False
+
     def test_admin_role_permissions(self):
         """ADMIN role: Has full access to all 8 modules and administrative functions."""
         role = Role.ADMIN
@@ -274,6 +287,7 @@ class TestRoleBasedAccessControl:
         """Verifies require_role raises AuthorizationError for unauthorized roles."""
         assert require_role(Role.ADMIN, [Role.ADMIN]) is True
         assert require_role(Role.QUANT_TRADER, [Role.QUANT_TRADER, Role.ADMIN]) is True
+        assert require_role(Role.QUANT_DEVELOPER, [Role.QUANT_DEVELOPER, Role.ADMIN]) is True
 
         with pytest.raises(AuthorizationError):
             require_role(Role.USER, [Role.ADMIN])
@@ -285,6 +299,7 @@ class TestRoleBasedAccessControl:
         assert get_role_display_name(Role.USER) == "User"
         assert get_role_display_name(Role.QUANT_TRADER) == "Quant Trader"
         assert get_role_display_name(Role.QUANT_RESEARCHER) == "Quant Researcher"
+        assert get_role_display_name(Role.QUANT_DEVELOPER) == "Quant Developer"
         assert get_role_display_name(Role.ADMIN) == "Admin"
 
 

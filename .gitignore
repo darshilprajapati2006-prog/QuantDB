@@ -233,3 +233,6 @@ dist/
 *serviceAccountKey*.json
 *firebase-adminsdk*.json
 serviceAccountKey.json
+
+# Local runtime & tunnel files
+tunnel_url.txt

@@ -782,10 +782,10 @@ with admin_tab2:
     """, unsafe_allow_html=True)
 
     rbac_df = pd.DataFrame([
-        {"Role": "USER", "Display": "User", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Restricted", "Portfolio": "Allowed", "Strategies": "Restricted", "Backtesting": "Restricted", "Reports": "Allowed", "Admin Console": "No Access"},
+        {"Role": "USER", "Display": "User", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Paper Execution", "Portfolio": "Allowed", "Strategies": "Restricted", "Backtesting": "Restricted", "Reports": "Allowed", "Admin Console": "No Access"},
         {"Role": "QUANT_TRADER", "Display": "Quant Trader", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Paper Execution", "Portfolio": "Allowed", "Strategies": "View Only", "Backtesting": "Restricted", "Reports": "Allowed", "Admin Console": "No Access"},
-        {"Role": "QUANT_DEVELOPER", "Display": "Quant Developer", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Full Paper Trading", "Portfolio": "Allowed", "Strategies": "Full Access", "Backtesting": "Full Access", "Reports": "Allowed", "Admin Console": "No Access"},
         {"Role": "QUANT_RESEARCHER", "Display": "Quant Researcher", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Restricted", "Portfolio": "Allowed", "Strategies": "Full Access", "Backtesting": "Full Access", "Reports": "Allowed", "Admin Console": "No Access"},
+        {"Role": "QUANT_DEVELOPER", "Display": "Quant Developer", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Full Paper Trading", "Portfolio": "Allowed", "Strategies": "Full Access", "Backtesting": "Full Access", "Reports": "Allowed", "Admin Console": "No Access"},
         {"Role": "ADMIN", "Display": "Admin", "Overview": "Allowed", "Market Data": "Full Read", "Trading": "Full Paper Trading", "Portfolio": "All Portfolios", "Strategies": "Full Access", "Backtesting": "Full Access", "Reports": "Allowed", "Admin Console": "Full Control"},
     ])
     render_dataframe(rbac_df, hide_index=True)

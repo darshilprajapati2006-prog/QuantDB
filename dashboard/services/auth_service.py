@@ -59,7 +59,7 @@ MOCK_USERS_SEED: List[Dict[str, Any]] = [
         "user_id": 102,
         "username": "trader01",
         "name": "Quant Trader Demo",
-        "email": "trader01@quantdb.local",
+        "email": "trader@quantdb.com",
         "password": "Trader01@QuantDB",
         "role": Role.QUANT_TRADER,
         "status": "ACTIVE",
@@ -69,27 +69,27 @@ MOCK_USERS_SEED: List[Dict[str, Any]] = [
         "user_id": 103,
         "username": "researcher01",
         "name": "Quant Researcher Demo",
-        "email": "researcher01@quantdb.local",
+        "email": "researcher@quantdb.com",
         "password": "Researcher01@QuantDB",
         "role": Role.QUANT_RESEARCHER,
         "status": "ACTIVE",
         "is_verified": True,
     },
     {
-        "user_id": 105,
+        "user_id": 104,
         "username": "developer01",
         "name": "Quant Developer Demo",
-        "email": "developer01@quantdb.local",
+        "email": "developer@quantdb.com",
         "password": "Developer01@QuantDB",
         "role": Role.QUANT_DEVELOPER,
         "status": "ACTIVE",
         "is_verified": True,
     },
     {
-        "user_id": 104,
+        "user_id": 105,
         "username": "admin01",
         "name": "Admin Demo",
-        "email": "admin01@quantdb.local",
+        "email": "admin@quantdb.com",
         "password": "Admin01@QuantDB",
         "role": Role.ADMIN,
         "status": "ACTIVE",
@@ -120,6 +120,10 @@ def init_session_state() -> None:
         st.session_state["pending_verification"] = None
     if "otp_msg" not in st.session_state:
         st.session_state["otp_msg"] = None
+    if "account_created_msg" not in st.session_state:
+        st.session_state["account_created_msg"] = None
+    if "prefill_email" not in st.session_state:
+        st.session_state["prefill_email"] = ""
 
 
 def is_authenticated() -> bool:
@@ -255,18 +259,6 @@ def login(identifier: str, password: str, selected_role: Optional[str] = None) -
         st.session_state["auth_screen"] = "signin"
         st.session_state["pending_verification"] = None
 
-        # Apply selected role override if chosen
-        if selected_role and selected_role in ROLE_OPTION_MAP:
-            chosen_role = ROLE_OPTION_MAP[selected_role]
-            st.session_state["role"] = chosen_role
-            st.session_state["role_display"] = get_role_display_name(chosen_role)
-            try:
-                repo.update_user_role(user_info["user_id"], chosen_role)
-                from dashboard.services.analytics_service import clear_analytics_service_cache
-                clear_analytics_service_cache()
-            except Exception:
-                pass
-
         # Dispatch security login alert email to user asynchronously
         import threading
         def _async_mail_sql(to_email, u_name):
@@ -333,10 +325,14 @@ def signup(
     role: str = Role.USER,
 ) -> Tuple[bool, str]:
     """
-    Handles user registration using Firebase (password-only, no email verification required).
+    Handles user registration using Firebase (when configured) or direct database registration.
+    In academic simulation / offline development when SMTP is unconfigured:
+    Auto-verifies and logs in user directly into the active session.
+    When SMTP is configured: transitions to OTP verification.
     """
     init_session_state()
-    chosen_role = ROLE_OPTION_MAP.get(role, normalize_role(role))
+    # For system security: Public self-registration is strictly restricted to Role.USER
+    chosen_role = Role.USER
     if firebase_auth.is_configured():
         if not email or "@" not in email:
             return False, "Please enter a valid email address."
@@ -373,12 +369,48 @@ def signup(
             except Exception as sync_err:
                 logger.error(f"MySQL user sync error on sign up: {sync_err}")
 
-            return True, f"Account created successfully! You can now sign in with your email and password."
+            st.session_state["created_account_name"] = clean_name
+            st.session_state["created_account_email"] = clean_email
+            st.session_state["created_account_username"] = uname
+            st.session_state["created_account_role"] = get_role_display_name(chosen_role)
+            st.session_state["prefill_email"] = clean_email
+            st.session_state["account_created_msg"] = "Account created successfully! You can now sign in with your email and password."
+            st.session_state["auth_screen"] = "account_created"
+            return True, "Account created successfully! You can now sign in with your email and password."
         except firebase_auth.FirebaseAuthError as e:
             return False, str(e)
         except Exception as e:
             logger.error(f"Error during Firebase registration: {e}")
             return False, f"Registration failed: {e}"
+
+    clean_email = email.strip().lower() if email else ""
+    clean_username = username.strip().lower() if username else ""
+
+    # Check if this user already exists in the database
+    try:
+        repo = Repository()
+        existing = repo.get_user_by_email(clean_email) if clean_email else None
+        if not existing and clean_username:
+            existing = repo.get_user_by_username(clean_username)
+
+        if existing:
+            stored_hash = existing.get("password_hash") or ""
+            # If the user registered earlier with the same password, auto-verify and log them straight in!
+            if verify_password(password, stored_hash):
+                if not existing.get("is_verified"):
+                    repo.update_user_verified(existing["user_id"], True)
+                st.session_state["authenticated"] = True
+                st.session_state["user_id"] = existing["user_id"]
+                st.session_state["username"] = existing.get("username") or clean_username
+                st.session_state["display_name"] = existing.get("name") or name
+                st.session_state["email"] = existing.get("email") or clean_email
+                st.session_state["role"] = existing.get("role", chosen_role)
+                st.session_state["role_display"] = get_role_display_name(existing.get("role", chosen_role))
+                st.session_state["auth_screen"] = "signin"
+                st.session_state["pending_verification"] = None
+                return True, f"Welcome to QuantDB, {existing.get('name', name)}! Signed in successfully."
+    except Exception as e:
+        logger.warning(f"Existing user verification check in signup: {e}")
 
     try:
         repo = Repository()
@@ -392,6 +424,39 @@ def signup(
             role=chosen_role,
             repo=repo,
         )
+
+        user_id = res["user_id"]
+        from src.auth.email_service import get_smtp_config
+        smtp_cfg = get_smtp_config()
+        is_smtp_active = bool(smtp_cfg.get("host")) and get_current_data_mode().lower() != "mock"
+
+        # In academic simulation / local development where SMTP is unconfigured:
+        # Auto-verify account and provide direct terminal entry with clear confirmation message!
+        if not is_smtp_active:
+            repo.update_user_verified(user_id, True)
+            st.session_state["temp_user_id"] = user_id
+            st.session_state["temp_username"] = res["username"]
+            st.session_state["temp_display_name"] = res["name"]
+            st.session_state["temp_email"] = res["email"]
+            st.session_state["temp_role"] = chosen_role
+            st.session_state["temp_role_display"] = get_role_display_name(chosen_role)
+            st.session_state["created_account_name"] = res["name"]
+            st.session_state["created_account_email"] = res["email"]
+            st.session_state["created_account_username"] = res["username"]
+            st.session_state["created_account_role"] = get_role_display_name(chosen_role)
+            st.session_state["prefill_email"] = res["email"]
+            st.session_state["account_created_msg"] = f"Account created successfully! Welcome to QuantDB, {res['name']}!"
+            st.session_state["auth_screen"] = "account_created"
+            st.session_state["pending_verification"] = None
+            return True, f"Account created successfully! Welcome to QuantDB, {res['name']}!"
+
+        # If live SMTP is configured:
+        st.session_state["created_account_name"] = res["name"]
+        st.session_state["created_account_email"] = res["email"]
+        st.session_state["created_account_username"] = res["username"]
+        st.session_state["created_account_role"] = get_role_display_name(chosen_role)
+        st.session_state["prefill_email"] = res["email"]
+        st.session_state["account_created_msg"] = f"Account created successfully! Verification code sent to {res['email']}."
         st.session_state["pending_verification"] = {
             "user_id": res["user_id"],
             "email": res["email"],
@@ -399,8 +464,8 @@ def signup(
             "name": res["name"],
         }
         st.session_state["auth_screen"] = "verify"
-        st.session_state["otp_msg"] = "Verification code sent to your email."
-        return True, "Verification code sent to your email."
+        st.session_state["otp_msg"] = f"Account created successfully! Verification code sent to {res['email']}."
+        return True, f"Account created successfully! Verification code sent to {res['email']}."
     except RegistrationError as e:
         return False, str(e)
     except OTPCooldownError as e:
@@ -454,6 +519,8 @@ def logout() -> None:
     st.session_state["role_display"] = None
     st.session_state["auth_screen"] = "signin"
     st.session_state["pending_verification"] = None
+    st.session_state["account_created_msg"] = None
+    st.session_state["prefill_email"] = ""
 
 
 def check_page_access(page_name: str) -> bool:
@@ -544,6 +611,61 @@ def render_login_screen() -> None:
                 st.rerun()
 
         # -------------------------------------------------------------
+        # SCREEN 1B: ACCOUNT CREATED SUCCESS SCREEN
+        # -------------------------------------------------------------
+        elif auth_mode == "account_created":
+            created_name = st.session_state.get("created_account_name", "User")
+            created_role = st.session_state.get("created_account_role", "User")
+            created_email = st.session_state.get("created_account_email", "")
+            created_username = st.session_state.get("created_account_username", "")
+            has_direct_access = bool(st.session_state.get("temp_user_id"))
+
+            st.markdown(
+                f"""
+                <div style="background: #111827; border: 1px solid #10B981; border-radius: 10px; padding: 26px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5); text-align: center;">
+                    <div style="font-size: 2.8rem; margin-bottom: 12px;">🎉</div>
+                    <div style="font-size: 1.35rem; font-weight: 800; color: #10B981; margin-bottom: 8px;">
+                        Account Created Successfully!
+                    </div>
+                    <div style="color: #E2E8F0; font-size: 0.95rem; line-height: 1.5; margin-bottom: 8px;">
+                        Welcome to QuantDB, <strong>{created_name}</strong>!
+                    </div>
+                    <div style="color: #94A3B8; font-size: 0.82rem; margin-bottom: 16px; line-height: 1.5;">
+                        Your institutional account has been created with role <strong style="color: #38BDF8;">{created_role}</strong>.<br>
+                        Email: <strong style="color: #F8FAFC;">{created_email}</strong> &nbsp;|&nbsp; Username: <strong style="color: #F8FAFC;">{created_username}</strong>
+                    </div>
+                    <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 6px; padding: 8px 14px; font-size: 0.78rem; color: #34D399; margin-bottom: 6px;">
+                        ✅ Account is active and ready to use.
+                    </div>
+                </div>
+            """,
+                unsafe_allow_html=True,
+            )
+            st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
+
+            if has_direct_access:
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("SIGN IN TO TERMINAL", type="primary", use_container_width=True):
+                        st.session_state["auth_screen"] = "signin"
+                        st.rerun()
+                with col_btn2:
+                    if st.button("ENTER DASHBOARD DIRECTLY →", type="secondary", use_container_width=True):
+                        st.session_state["authenticated"] = True
+                        st.session_state["user_id"] = st.session_state.get("temp_user_id")
+                        st.session_state["username"] = st.session_state.get("temp_username")
+                        st.session_state["display_name"] = st.session_state.get("temp_display_name")
+                        st.session_state["email"] = st.session_state.get("temp_email")
+                        st.session_state["role"] = st.session_state.get("temp_role")
+                        st.session_state["role_display"] = st.session_state.get("temp_role_display")
+                        st.session_state["auth_screen"] = "signin"
+                        st.rerun()
+            else:
+                if st.button("PROCEED TO SIGN IN", type="primary", use_container_width=True):
+                    st.session_state["auth_screen"] = "signin"
+                    st.rerun()
+
+        # -------------------------------------------------------------
         # SCREEN 2: EMAIL OTP VERIFICATION SCREEN
         # -------------------------------------------------------------
         elif auth_mode == "verify":
@@ -610,6 +732,18 @@ def render_login_screen() -> None:
                     st.session_state["pending_verification"] = None
                     st.rerun()
 
+            from src.auth.email_service import get_smtp_config
+            if not get_smtp_config().get("host"):
+                st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+                if st.button("⚡ Instant Account Verification (Demo Mode)", type="secondary", use_container_width=True):
+                    if target_uid:
+                        repo = Repository()
+                        repo.update_user_verified(target_uid, True)
+                        st.session_state["pending_verification"] = None
+                        st.session_state["auth_screen"] = "verified_success"
+                        st.success("Account verified successfully! You may now sign in.")
+                        st.rerun()
+
         # -------------------------------------------------------------
         # SCREEN 3: TABBED SIGN IN & SIGN UP (CREATE ACCOUNT)
         # -------------------------------------------------------------
@@ -675,9 +809,12 @@ def render_login_screen() -> None:
             ]
 
             with tab_signin:
+                if st.session_state.get("account_created_msg"):
+                    st.success(f"✅ {st.session_state.get('account_created_msg')}")
                 with st.form("quantdb_login_form", clear_on_submit=False):
                     username_input = st.text_input(
                         "Email",
+                        value=st.session_state.get("prefill_email", ""),
                         placeholder="you@example.com",
                         help="Use the email address you registered with.",
                     )
@@ -689,19 +826,16 @@ def render_login_screen() -> None:
 
                     st.markdown(
                         """
-                        <div style="font-size: 0.74rem; font-weight: 700; color: #94A3B8; text-transform: uppercase; margin: 12px 0 4px 0; letter-spacing: 0.05em;">
-                            Select Your Role (Checkbox Access):
+                        <div style="margin: 12px 0 6px 0; background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(148, 163, 184, 0.15); border-radius: 6px; padding: 8px 12px;">
+                            <div style="font-size: 0.72rem; font-weight: 700; color: #94A3B8; text-transform: uppercase; letter-spacing: 0.05em;">
+                                Authentication Gateway:
+                            </div>
+                            <div style="font-size: 0.75rem; color: #64748B; margin-top: 2px;">
+                                🛡️ Platform permissions (Admin, Trader, Developer, Researcher, User) are securely verified from your account credentials.
+                            </div>
                         </div>
                     """,
                         unsafe_allow_html=True,
-                    )
-                    selected_login_role = st.radio(
-                        "Select Your Role",
-                        options=role_list,
-                        index=0,
-                        horizontal=True,
-                        label_visibility="collapsed",
-                        key="login_role_choice",
                     )
 
                     submit_btn = st.form_submit_button(
@@ -709,9 +843,7 @@ def render_login_screen() -> None:
                     )
 
                     if submit_btn:
-                        success, msg = login(
-                            username_input, password_input, selected_role=selected_login_role
-                        )
+                        success, msg = login(username_input, password_input)
                         if success:
                             st.success(
                                 f"Access granted as {st.session_state.get('role_display')}! Welcome back, {st.session_state.get('display_name')}!"
@@ -757,19 +889,20 @@ def render_login_screen() -> None:
 
                     st.markdown(
                         """
-                        <div style="font-size: 0.74rem; font-weight: 700; color: #94A3B8; text-transform: uppercase; margin: 12px 0 4px 0; letter-spacing: 0.05em;">
-                            Select Account Role:
+                        <div style="margin: 14px 0 8px 0; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 6px; padding: 10px 14px;">
+                            <div style="font-size: 0.72rem; font-weight: 700; color: #94A3B8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 3px;">
+                                Registration Account Role:
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-size: 0.90rem; font-weight: 700; color: #38BDF8;">User (Institutional Trader / Analyst)</span>
+                                <span style="font-size: 0.68rem; background: rgba(56, 189, 248, 0.15); color: #38BDF8; padding: 2px 8px; border-radius: 4px; font-weight: 600; border: 1px solid rgba(56, 189, 248, 0.3);">DEFAULT ROLE</span>
+                            </div>
+                            <div style="font-size: 0.72rem; color: #64748B; margin-top: 5px; line-height: 1.4;">
+                                🔒 For security, privileged institutional roles (Admin, Quant Developer, Quant Researcher, Quant Trader) are strictly fixed and pre-configured.
+                            </div>
                         </div>
                     """,
                         unsafe_allow_html=True,
-                    )
-                    selected_signup_role = st.radio(
-                        "Select Account Role",
-                        options=role_list,
-                        index=0,
-                        horizontal=True,
-                        label_visibility="collapsed",
-                        key="signup_role_choice",
                     )
 
                     signup_btn = st.form_submit_button(
@@ -784,10 +917,12 @@ def render_login_screen() -> None:
                             password=reg_password,
                             confirm_password=reg_confirm_password,
                             phone=reg_phone,
-                            role=selected_signup_role,
+                            role="User",
                         )
                         if s_ok:
-                            st.success(s_msg)
+                            st.session_state["account_created_msg"] = s_msg
+                            st.session_state["auth_screen"] = "account_created"
+                            st.toast(s_msg, icon="🎉")
                             st.rerun()
                         else:
                             st.error(s_msg)
@@ -808,45 +943,51 @@ def render_login_screen() -> None:
             demo_rows = [
                 (
                     "Admin",
+                    "admin@quantdb.com",
                     "admin01",
                     "Admin01@QuantDB",
-                    "Full platform governance & simulation",
+                    "Full platform governance, user administration & simulation",
                 ),
                 (
                     "Quant Developer",
+                    "developer@quantdb.com",
                     "developer01",
                     "Developer01@QuantDB",
-                    "Algorithmic execution, models, API & backtesting",
+                    "Algorithmic execution, models, API & backtesting engine",
                 ),
                 (
                     "Quant Researcher",
+                    "researcher@quantdb.com",
                     "researcher01",
                     "Researcher01@QuantDB",
-                    "Backtesting, strategies, research analytics",
+                    "Backtesting, strategies, research analytics & risk models",
                 ),
                 (
                     "Quant Trader",
+                    "trader@quantdb.com",
                     "trader01",
                     "Trader01@QuantDB",
-                    "Simulated paper trading & order tickets",
+                    "Simulated paper trading, order tickets & execution",
                 ),
                 (
                     "User",
+                    "user01@quantdb.local",
                     "user01",
                     "User01@QuantDB",
-                    "Market data, portfolio overview & reports",
+                    "Market data, portfolio overview, paper trading & reports",
                 ),
             ]
 
-            for role_lbl, u_val, p_val, desc in demo_rows:
+            for role_lbl, email_val, u_val, p_val, desc in demo_rows:
                 st.markdown(
                     f"""
-                    <div style="border-left: 3px solid #06B6D4; padding: 4px 10px; margin-bottom: 8px; background: #0F172A;">
-                        <strong style="color: #38BDF8;">{role_lbl}</strong><br>
-                        <span style="font-size: 0.75rem; color: #CBD5E1; font-family: 'JetBrains Mono', monospace;">
-                            User: <strong>{u_val}</strong> &nbsp;|&nbsp; Pass: <strong>{p_val}</strong>
+                    <div style="border-left: 3px solid #06B6D4; padding: 6px 12px; margin-bottom: 8px; background: #0F172A; border-radius: 0 4px 4px 0;">
+                        <strong style="color: #38BDF8; font-size: 0.85rem;">{role_lbl}</strong><br>
+                        <span style="font-size: 0.76rem; color: #CBD5E1; font-family: 'JetBrains Mono', monospace;">
+                            Email: <strong>{email_val}</strong> &nbsp;|&nbsp; User: <strong>{u_val}</strong><br>
+                            Password: <strong style="color: #F8FAFC;">{p_val}</strong>
                         </span>
-                        <div style="font-size: 0.70rem; color: #64748B;">{desc}</div>
+                        <div style="font-size: 0.70rem; color: #64748B; margin-top: 3px;">{desc}</div>
                     </div>
                 """,
                     unsafe_allow_html=True,
@@ -867,5 +1008,10 @@ def require_auth(current_page: str = "Overview") -> bool:
     if not check_page_access(current_page):
         render_access_restricted_banner(current_page)
         st.stop()
+
+    if st.session_state.get("account_created_msg"):
+        msg = st.session_state.pop("account_created_msg")
+        st.success(f"🎉 **{msg}**")
+        st.toast(msg, icon="🎉")
 
     return True

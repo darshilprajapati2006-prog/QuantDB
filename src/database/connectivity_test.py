@@ -17,6 +17,7 @@ import sys
 from typing import Any, Dict, Tuple
 
 import mysql.connector
+
 from mysql.connector import Error
 
 from src.database.connection import _get_db_param, _get_ssl_config, get_connection
@@ -194,8 +195,8 @@ def print_diagnostic_report(results: Dict[str, Any]) -> None:
 
     for label, stage in stages:
         st = stage.get("status")
-        icon = "✓" if st == "PASSED" else "✗"
-        print(f"[{icon}] {label}: {st}")
+        icon = "[PASS]" if st == "PASSED" else "[FAIL]"
+        print(f"{icon} {label}: {st}")
         if stage.get("error"):
             print(f"    Reason: {stage['error']}")
 

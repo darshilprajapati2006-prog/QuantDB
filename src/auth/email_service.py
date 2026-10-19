@@ -1,48 +1,68 @@
 """
 QuantDB Email Service Module.
 
-Handles SMTP email dispatching for OTP verification.
-Supports standard SMTP, STARTTLS (e.g., Gmail with App Passwords), and SSL.
-Reads configuration from environment variables or Streamlit secrets.
-Provides mock email dispatching for tests and offline/MOCK mode.
-NEVER logs plaintext OTP values in application logs.
+Handles SMTP email dispatching for OTP verification and account notifications.
+Supports SMTP with STARTTLS (commonly port 587) and implicit SSL (port 465).
+Configuration is read through the project's _get_db_param helper.
+Supports test interception and mock/offline mode.
+
+Security:
+- Never logs plaintext OTP values or SMTP passwords.
+- Does not claim that mock-mode emails were actually delivered.
 """
+
+from __future__ import annotations
 
 import email.message
 import logging
 import os
 import re
 import smtplib
+import socket
+from datetime import datetime, timezone
+from email.utils import parseaddr
 from typing import Callable, Optional, Tuple
 
 from src.database.connection import _get_db_param
 
 logger = logging.getLogger(__name__)
 
-# Test hook: optional custom sender function for unit/integration tests
+# Test hook: (recipient, subject, body) -> success
 _test_email_sender: Optional[Callable[[str, str, str], bool]] = None
 
 
-def set_test_email_sender(sender: Optional[Callable[[str, str, str], bool]]) -> None:
-    """Sets a custom test email sender to intercept emails during automated tests."""
+def set_test_email_sender(
+    sender: Optional[Callable[[str, str, str], bool]],
+) -> None:
+    """Set or clear the custom sender used by tests."""
     global _test_email_sender
     _test_email_sender = sender
 
 
+def _get_config_value(name: str, default: str = "") -> str:
+    """Read a configuration value safely as a string."""
+    value = _get_db_param(name, default)
+    return default if value is None else str(value).strip()
+
+
 def get_smtp_config() -> dict:
-    """Retrieves SMTP configuration from environment or Streamlit secrets."""
-    host = _get_db_param("SMTP_HOST", "")
-    port_str = _get_db_param("SMTP_PORT", "587")
+    """Return SMTP settings from environment/Streamlit configuration."""
+    host = _get_config_value("SMTP_HOST")
+    port_text = _get_config_value("SMTP_PORT", "587")
+    username = _get_config_value("SMTP_USERNAME")
+    password = _get_config_value("SMTP_PASSWORD")
+    from_email = _get_config_value("SMTP_FROM_EMAIL", username or "noreply@quantdb.local")
+    use_tls_text = _get_config_value("SMTP_USE_TLS", "true").lower()
+
     try:
-        port = int(port_str)
-    except ValueError:
+        port = int(port_text)
+    except (TypeError, ValueError):
+        logger.warning("Invalid SMTP_PORT; defaulting to 587.")
         port = 587
 
-    username = _get_db_param("SMTP_USERNAME", "")
-    password = _get_db_param("SMTP_PASSWORD", "")
-    from_email = _get_db_param("SMTP_FROM_EMAIL", username or "noreply@quantdb.local")
-    use_tls_str = _get_db_param("SMTP_USE_TLS", "true").lower()
-    use_tls = use_tls_str in ("true", "1", "yes")
+    if not 1 <= port <= 65535:
+        logger.warning("SMTP_PORT is outside the valid range; defaulting to 587.")
+        port = 587
 
     return {
         "host": host,
@@ -50,8 +70,90 @@ def get_smtp_config() -> dict:
         "username": username,
         "password": password,
         "from_email": from_email,
-        "use_tls": use_tls,
+        "use_tls": use_tls_text in {"true", "1", "yes", "on"},
     }
+
+
+def _is_mock_mode() -> bool:
+    """Return whether outbound email should be simulated."""
+    return (
+        os.getenv("DATA_MODE", "").strip().lower() == "mock"
+        or os.getenv("MOCK_SMTP", "0").strip().lower() in {"1", "true", "yes", "on"}
+    )
+
+
+def _valid_email_address(address: str) -> bool:
+    """Perform a basic syntax check without claiming the mailbox exists."""
+    if not isinstance(address, str) or not address.strip():
+        return False
+    clean = address.strip()
+    parsed_name, parsed_address = parseaddr(clean)
+    if parsed_address != clean or parsed_name:
+        return False
+    return bool(re.fullmatch(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+", clean))
+
+
+def _dispatch_email(to_email: str, subject: str, body_text: str) -> bool:
+    """Send an email, or safely intercept/simulate it for tests and mock mode."""
+    if _test_email_sender is not None:
+        try:
+            return bool(_test_email_sender(to_email, subject, body_text))
+        except Exception:
+            logger.exception("Test email sender failed.")
+            return False
+
+    config = get_smtp_config()
+    if _is_mock_mode() or not config["host"]:
+        logger.info("Simulated email dispatch for recipient %s (mock/unconfigured SMTP).", to_email)
+        return True
+
+    msg = email.message.EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = config["from_email"]
+    msg["To"] = to_email
+    msg.set_content(body_text)
+
+    host = config["host"]
+    port = config["port"]
+    username = config["username"]
+    password = config["password"]
+    use_tls = config["use_tls"]
+
+    try:
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=10) as server:
+                if username:
+                    if not password:
+                        raise RuntimeError("SMTP_PASSWORD is required when SMTP_USERNAME is configured.")
+                    server.login(username, password)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(host, port, timeout=10) as server:
+                server.ehlo()
+                if use_tls:
+                    server.starttls()
+                    server.ehlo()
+                if username:
+                    if not password:
+                        raise RuntimeError("SMTP_PASSWORD is required when SMTP_USERNAME is configured.")
+                    server.login(username, password)
+                server.send_message(msg)
+
+        logger.info("Email successfully dispatched to %s.", to_email)
+        return True
+    except smtplib.SMTPAuthenticationError:
+        logger.error("SMTP authentication failed for configured user %s.", username or "(not set)")
+        raise RuntimeError(
+            "Email delivery authentication failed. Check the SMTP username and app password."
+        ) from None
+    except RuntimeError:
+        raise
+    except (smtplib.SMTPException, OSError, TimeoutError) as exc:
+        # Log the exception type only; do not risk leaking credentials or message content.
+        logger.error("Email delivery failed for %s (%s).", to_email, type(exc).__name__)
+        raise RuntimeError(
+            "Unable to deliver email. Check SMTP settings and network connectivity."
+        ) from None
 
 
 def send_otp_email(
@@ -62,97 +164,27 @@ def send_otp_email(
     recipient_name: str = "",
     expiry_minutes: int = 5,
 ) -> bool:
-    """
-    Sends a 6-digit verification OTP to the user's email via SMTP.
+    """Send an email verification OTP without logging the OTP itself."""
+    target_email = (to_email or recipient_email or "").strip()
+    target_name = (user_name or recipient_name or "").strip()
 
-    Format complies with specifications:
-        QuantDB
-        Email Verification
-
-        Your verification OTP is:
-        123456
-
-        This OTP expires in 5 minutes.
-        If this was not you, ignore this email.
-
-    Never logs the OTP value itself.
-    """
-    target_email = (to_email or recipient_email).strip()
-    target_name = (user_name or recipient_name).strip()
-
-    if not target_email or "@" not in target_email:
+    if not _valid_email_address(target_email):
         raise ValueError("Invalid recipient email address.")
+    if not isinstance(otp, str) or not re.fullmatch(r"\d{6}", otp):
+        raise ValueError("OTP must be a six-digit string.")
+    if not isinstance(expiry_minutes, int) or expiry_minutes <= 0:
+        raise ValueError("expiry_minutes must be a positive integer.")
 
     greeting = f"Hello {target_name},\n\n" if target_name else ""
     body_text = (
         f"{greeting}QuantDB\n"
-        f"Email Verification\n\n"
-        f"Your verification OTP is:\n"
+        "Email Verification\n\n"
+        "Your verification OTP is:\n"
         f"{otp}\n\n"
         f"This OTP expires in {expiry_minutes} minutes.\n"
-        f"If this was not you, ignore this email.\n"
+        "If this was not you, ignore this email.\n"
     )
-    subject = "QuantDB — Email Verification Code"
-
-    # 1. Check if test interceptor is registered (e.g., during pytest)
-    if _test_email_sender is not None:
-        try:
-            return _test_email_sender(target_email, subject, body_text)
-        except TypeError:
-            return _test_email_sender(target_email, otp, target_name)
-
-    # 2. Check if running in mock/test mode or if SMTP is unconfigured
-    is_mock = os.getenv("DATA_MODE", "").lower() == "mock" or os.getenv("MOCK_SMTP", "0") == "1"
-    config = get_smtp_config()
-
-    if not config["host"] or is_mock:
-        # In mock mode or when SMTP is not configured, simulate email sending safely
-        logger.info(f"Simulated SMTP dispatch: verification email queued for recipient {target_email}")
-        return True
-
-    # 3. Construct email message
-    msg = email.message.EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = config["from_email"]
-    msg["To"] = target_email
-    msg.set_content(body_text)
-
-    # 4. Connect and send via SMTP
-    host = config["host"]
-    port = config["port"]
-    username = config["username"]
-    password = config["password"]
-    use_tls = config["use_tls"]
-
-    try:
-        if port == 465:
-            # SSL connection
-            with smtplib.SMTP_SSL(host, port, timeout=10) as server:
-                if username and password:
-                    server.login(username, password)
-                server.send_message(msg)
-        else:
-            # Standard connection with optional STARTTLS
-            with smtplib.SMTP(host, port, timeout=10) as server:
-                if use_tls:
-                    server.starttls()
-                if username and password:
-                    server.login(username, password)
-                server.send_message(msg)
-
-        logger.info(f"Verification email successfully dispatched to {to_email}")
-        return True
-
-    except smtplib.SMTPAuthenticationError:
-        safe_msg = f"SMTP Authentication failed for user {username}. Please check SMTP credentials or App Password."
-        logger.error(safe_msg)
-        raise RuntimeError("Email delivery service authentication error. Please contact platform administrator.")
-
-    except Exception as e:
-        # Mask credentials from error logs
-        err_str = str(e).replace(password, "******") if password else str(e)
-        logger.error(f"Failed to send verification email to {to_email}: {err_str}")
-        raise RuntimeError("Unable to deliver verification email. Please check server network configuration or try again.")
+    return _dispatch_email(target_email, "QuantDB — Email Verification Code", body_text)
 
 
 def send_login_alert_email(
@@ -160,124 +192,92 @@ def send_login_alert_email(
     user_name: str = "",
     login_time: Optional[str] = None,
 ) -> bool:
-    """
-    Sends a security notification email whenever a user signs into QuantDB.
-    """
-    target_email = to_email.strip()
-    target_name = user_name.strip()
+    """Send a security notification when a user signs in."""
+    target_email = (to_email or "").strip()
+    target_name = (user_name or "").strip()
 
-    if not target_email or "@" not in target_email:
+    if not _valid_email_address(target_email):
         return False
 
-    from datetime import datetime
-    now_str = login_time or datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
-
+    # Use UTC explicitly when a timestamp is generated here.
+    now_str = login_time or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     greeting = f"Hello {target_name},\n\n" if target_name else "Hello,\n\n"
     body_text = (
         f"{greeting}QuantDB Security Notification\n\n"
-        f"Your QuantDB terminal account was successfully signed into at:\n"
+        "Your QuantDB terminal account was successfully signed into at:\n"
         f"{now_str}\n\n"
-        f"Details:\n"
+        "Details:\n"
         f"• Account: {target_email}\n"
-        f"• Platform: QuantDB Terminal\n\n"
-        f"If this was you, you can safely ignore this notification.\n"
-        f"If you did NOT perform this login, please change your password immediately.\n\n"
-        f"Regards,\n"
-        f"QuantDB Security Team\n"
+        "• Platform: QuantDB Terminal\n\n"
+        "If this was you, you can safely ignore this notification.\n"
+        "If you did NOT perform this login, please change your password immediately.\n\n"
+        "Regards,\n"
+        "QuantDB Security Team\n"
     )
-    subject = "QuantDB — Security Alert: New Login Detected"
-
-    if _test_email_sender is not None:
-        try:
-            return _test_email_sender(target_email, subject, body_text)
-        except Exception:
-            return True
-
-    is_mock = os.getenv("DATA_MODE", "").lower() == "mock" or os.getenv("MOCK_SMTP", "0") == "1"
-    config = get_smtp_config()
-
-    if not config["host"] or is_mock:
-        logger.info(f"Simulated SMTP dispatch: Login alert email queued for {target_email}")
-        return True
-
-    msg = email.message.EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = config["from_email"]
-    msg["To"] = target_email
-    msg.set_content(body_text)
-
-    host = config["host"]
-    port = config["port"]
-    username = config["username"]
-    password = config["password"]
-    use_tls = config["use_tls"]
 
     try:
-        if port == 465:
-            with smtplib.SMTP_SSL(host, port, timeout=10) as server:
-                if username and password:
-                    server.login(username, password)
-                server.send_message(msg)
-        else:
-            with smtplib.SMTP(host, port, timeout=10) as server:
-                if use_tls:
-                    server.starttls()
-                if username and password:
-                    server.login(username, password)
-                server.send_message(msg)
-
-        logger.info(f"Login alert email successfully dispatched to {target_email}")
-        return True
-    except Exception as e:
-        logger.warning(f"Failed to dispatch login alert email to {target_email}: {e}")
+        return _dispatch_email(
+            target_email,
+            "QuantDB — Security Alert: New Login Detected",
+            body_text,
+        )
+    except Exception:
+        logger.warning("Unable to dispatch login alert to %s.", target_email)
         return False
 
 
 def validate_email_domain(email_str: str) -> Tuple[bool, str]:
     """
-    Validates email syntax and confirms that the domain has active DNS MX records.
-    Prevents creating accounts with non-existent or fake domains.
+    Validate email syntax and check whether its domain appears reachable.
+
+    DNS checks cannot prove that a mailbox exists. DNS/network failures are
+    treated as inconclusive rather than automatically rejecting the address.
     """
-    if not email_str or not isinstance(email_str, str):
+    if not isinstance(email_str, str) or not email_str.strip():
         return False, "An email address is required."
 
     clean = email_str.strip().lower()
-    pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
-    if not re.match(pattern, clean):
-        return False, "Please enter a valid email address format (e.g. name@example.com)."
+    if not _valid_email_address(clean):
+        return False, "Please enter a valid email address (e.g. name@example.com)."
 
-    domain = clean.split("@", 1)[1]
+    domain = clean.rsplit("@", 1)[1]
 
-    # Quick DNS MX verification with a short timeout to prevent UI lag
     try:
-        import dns.resolver
+        import dns.resolver  # type: ignore[import-not-found]
 
         resolver = dns.resolver.Resolver()
         resolver.lifetime = 2.0
         try:
-            resolver.resolve(domain, "MX")
-            return True, ""
+            answers = resolver.resolve(domain, "MX")
+            if answers:
+                return True, ""
         except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
-            # Fallback check A record or parent domain for subdomains like aid.svnit.ac.in
+            # Some domains may accept mail without an explicit MX record.
             try:
                 resolver.resolve(domain, "A")
                 return True, ""
-            except Exception:
-                parts = domain.split(".")
-                if len(parts) > 2:
-                    parent_domain = ".".join(parts[-2:])
-                    try:
-                        resolver.resolve(parent_domain, "MX")
-                        return True, ""
-                    except Exception:
-                        pass
-                return (
-                    False,
-                    f"The email domain '@{domain}' does not exist or cannot receive mail. Please use a valid, active email address.",
+            except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+                return False, (
+                    f"The email domain '@{domain}' does not appear to accept mail. "
+                    "Please check the address or use another email."
                 )
+        except (dns.resolver.NoNameservers, dns.resolver.Timeout):
+            logger.debug("DNS check inconclusive for domain %s.", domain)
+            return True, ""
+    except ModuleNotFoundError:
+        # dnspython is optional. A successful hostname lookup is a weaker check.
+        try:
+            socket.getaddrinfo(domain, None)
+            return True, ""
+        except (socket.gaierror, socket.herror):
+            return False, (
+                f"The email domain '@{domain}' could not be found. "
+                "Please check the address or use another email."
+            )
     except Exception as exc:
-        logger.debug("DNS check error (allowing fallback): %s", exc)
+        logger.debug("DNS check inconclusive for domain %s (%s).", domain, type(exc).__name__)
 
+    # Avoid blocking sign-up when DNS is temporarily unavailable.
     return True, ""
 
 
@@ -285,77 +285,36 @@ def send_registration_welcome_email(
     to_email: str,
     user_name: str = "",
 ) -> bool:
-    """
-    Sends an immediate registration confirmation and verification instructions email
-    via Gmail SMTP to ensure guaranteed primary inbox delivery.
-    """
-    target_email = to_email.strip()
-    target_name = user_name.strip()
+    """Send a registration confirmation and email-verification instructions."""
+    target_email = (to_email or "").strip()
+    target_name = (user_name or "").strip()
 
-    if not target_email or "@" not in target_email:
+    if not _valid_email_address(target_email):
         return False
 
     greeting = f"Hello {target_name},\n\n" if target_name else "Hello,\n\n"
     body_text = (
-        f"{greeting}Welcome to QuantDB — Quantitative Finance Research & Simulation Platform!\n\n"
-        f"Your account registration has been successfully initiated for:\n"
+        f"{greeting}"
+        "Welcome to QuantDB — Quantitative Finance Research & Simulation Platform!\n\n"
+        "Your account registration has been initiated for:\n"
         f"Account: {target_email}\n\n"
-        f"ACTION REQUIRED: Complete Email Verification\n"
-        f"--------------------------------------------------\n"
-        f"1. Firebase Authentication has dispatched an activation link to this email address.\n"
-        f"2. IMPORTANT: If you do not see the Firebase email in your Primary inbox within 1 minute,\n"
-        f"   please check your Spam or Junk folder.\n"
-        f"3. Click the verification link to activate your QuantDB account.\n"
-        f"4. Once verified, visit https://quantdb.streamlit.app to sign in.\n\n"
-        f"If you did not create a QuantDB account, please ignore this email.\n\n"
-        f"Best regards,\n"
-        f"QuantDB Engineering Team\n"
+        "ACTION REQUIRED: Complete Email Verification\n"
+        "--------------------------------------------------\n"
+        "1. Check your inbox for the Firebase Authentication verification email.\n"
+        "2. If it does not arrive, check your Spam or Junk folder.\n"
+        "3. Click the verification link to activate your QuantDB account.\n"
+        "4. Once verified, visit https://quantdb.streamlit.app to sign in.\n\n"
+        "If you did not create a QuantDB account, please ignore this email.\n\n"
+        "Best regards,\n"
+        "QuantDB Engineering Team\n"
     )
-    subject = "QuantDB — Complete Your Email Verification"
-
-    if _test_email_sender is not None:
-        try:
-            return _test_email_sender(target_email, subject, body_text)
-        except Exception:
-            return True
-
-    is_mock = os.getenv("DATA_MODE", "").lower() == "mock" or os.getenv("MOCK_SMTP", "0") == "1"
-    config = get_smtp_config()
-
-    if not config["host"] or is_mock:
-        logger.info(f"Simulated SMTP dispatch: Welcome email queued for {target_email}")
-        return True
-
-    msg = email.message.EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = config["from_email"]
-    msg["To"] = target_email
-    msg.set_content(body_text)
-
-    host = config["host"]
-    port = config["port"]
-    username = config["username"]
-    password = config["password"]
-    use_tls = config["use_tls"]
 
     try:
-        if port == 465:
-            with smtplib.SMTP_SSL(host, port, timeout=10) as server:
-                if username and password:
-                    server.login(username, password)
-                server.send_message(msg)
-        else:
-            with smtplib.SMTP(host, port, timeout=10) as server:
-                if use_tls:
-                    server.starttls()
-                if username and password:
-                    server.login(username, password)
-                server.send_message(msg)
-
-        logger.info(f"Registration welcome email successfully dispatched to {target_email}")
-        return True
-    except Exception as e:
-        logger.warning(f"Failed to dispatch registration welcome email to {target_email}: {e}")
+        return _dispatch_email(
+            target_email,
+            "QuantDB — Complete Your Email Verification",
+            body_text,
+        )
+    except Exception:
+        logger.warning("Unable to dispatch registration welcome email to %s.", target_email)
         return False
-
-

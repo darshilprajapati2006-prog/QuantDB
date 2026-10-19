@@ -544,7 +544,7 @@ class TestAuthenticationAndRBACIntegration:
 
     def test_user_cannot_self_register_as_admin(self, repo):
         """19. Privilege escalation attempt during registration forces Role.USER."""
-        for priv_role in [Role.ADMIN, Role.QUANT_TRADER, Role.QUANT_RESEARCHER]:
+        for priv_role in [Role.ADMIN, Role.QUANT_TRADER, Role.QUANT_RESEARCHER, Role.QUANT_DEVELOPER]:
             res = register_user(
                 name="Attacker",
                 username=f"hack_{priv_role.lower()}",
@@ -591,11 +591,11 @@ class TestAuthenticationAndRBACIntegration:
         # Allowed for USER
         assert has_page_access(role, "Overview") is True
         assert has_page_access(role, "Market Data") is True
+        assert has_page_access(role, "Trading") is True
         assert has_page_access(role, "Portfolio") is True
         assert has_page_access(role, "Reports") is True
 
         # Prohibited for USER
-        assert has_page_access(role, "Trading") is False
         assert has_page_access(role, "Strategies") is False
         assert has_page_access(role, "Backtesting") is False
         assert has_page_access(role, "Admin Console") is False

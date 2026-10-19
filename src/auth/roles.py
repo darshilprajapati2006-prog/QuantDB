@@ -1,7 +1,7 @@
 """
 QuantDB Role-Based Access Control (RBAC) Module.
 
-Defines the four core platform roles, their hierarchical permission boundaries,
+Defines the core platform roles, their hierarchical permission boundaries,
 human-readable display representations, and page navigation access controls.
 """
 
@@ -19,7 +19,7 @@ class Role:
     # Legacy compatibility alias
     SIMULATED_TRADER = "SIMULATED_TRADER"
 
-    ALL_ROLES = [USER, QUANT_TRADER, QUANT_DEVELOPER, QUANT_RESEARCHER, ADMIN]
+    ALL_ROLES = [USER, QUANT_TRADER, QUANT_RESEARCHER, QUANT_DEVELOPER, ADMIN]
 
 
 ROLE_DISPLAY_NAMES: Dict[str, str] = {
@@ -37,6 +37,7 @@ ROLE_ALLOWED_PAGES: Dict[str, List[str]] = {
     Role.USER: [
         "Overview",
         "Market Data",
+        "Trading",
         "Portfolio",
         "Reports",
     ],
@@ -48,18 +49,18 @@ ROLE_ALLOWED_PAGES: Dict[str, List[str]] = {
         "Strategies",
         "Reports",
     ],
-    Role.QUANT_DEVELOPER: [
+    Role.QUANT_RESEARCHER: [
         "Overview",
         "Market Data",
-        "Trading",
         "Portfolio",
         "Strategies",
         "Backtesting",
         "Reports",
     ],
-    Role.QUANT_RESEARCHER: [
+    Role.QUANT_DEVELOPER: [
         "Overview",
         "Market Data",
+        "Trading",
         "Portfolio",
         "Strategies",
         "Backtesting",
@@ -85,6 +86,8 @@ def normalize_role(role: str) -> str:
     cleaned = str(role).strip().upper()
     if cleaned == Role.SIMULATED_TRADER:
         return Role.QUANT_TRADER
+    if cleaned in ("DEVELOPER", "QUANT DEVELOPER", "QUANT_DEV", "DEV"):
+        return Role.QUANT_DEVELOPER
     if cleaned in Role.ALL_ROLES:
         return cleaned
     return Role.USER
@@ -111,7 +114,7 @@ def has_page_access(role: str, page_name: str) -> bool:
 def can_trade(role: str) -> bool:
     """Checks whether the role is permitted to perform simulated paper trading."""
     canon = normalize_role(role)
-    return canon in (Role.QUANT_TRADER, Role.QUANT_DEVELOPER, Role.ADMIN)
+    return canon in (Role.USER, Role.QUANT_TRADER, Role.QUANT_DEVELOPER, Role.ADMIN)
 
 
 def can_backtest(role: str) -> bool:

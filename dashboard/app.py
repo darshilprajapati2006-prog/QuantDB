@@ -34,8 +34,16 @@ from dashboard.services.portfolio_service import (
     get_portfolio_equity_history,
     get_portfolio_positions,
 )
-from dashboard.services.market_service import get_market_overview
-from dashboard.services.trading_service import get_orders, get_trades
+from dashboard.services.market_service import (
+    get_market_overview,
+    get_available_securities,
+    get_latest_quote,
+)
+from dashboard.services.trading_service import (
+    get_orders,
+    get_trades,
+    submit_simulated_order,
+)
 from dashboard.services.backtest_service import get_latest_summary
 from dashboard.services.strategy_service import get_strategies
 from dashboard.services.analytics_service import get_portfolio_risk_metrics, get_system_health
@@ -85,18 +93,23 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# Select active portfolio
+# Select active portfolio & Quick Trading Entry
 portfolios = get_all_portfolios()
 active_port_id = 1
 if portfolios:
     port_map = {f"{p['portfolio_name']} (ID: {p['portfolio_id']})": p["portfolio_id"] for p in portfolios}
-    selected_name = st.selectbox(
-        "Active Simulation Portfolio",
-        options=list(port_map.keys()),
-        index=0,
-        label_visibility="collapsed"
-    )
-    active_port_id = port_map[selected_name]
+    sel_col, trade_btn_col = st.columns([7, 3])
+    with sel_col:
+        selected_name = st.selectbox(
+            "Active Simulation Portfolio",
+            options=list(port_map.keys()),
+            index=0,
+            label_visibility="collapsed"
+        )
+        active_port_id = port_map[selected_name]
+    with trade_btn_col:
+        if st.button("⚡ Open Trading Terminal", key="btn_hero_trading", type="primary", use_container_width=True):
+            st.switch_page("pages/trading.py")
 
 # Fetch Portfolio Summary
 port_summary = get_portfolio_summary(active_port_id) or {
@@ -249,6 +262,17 @@ st.markdown("<div class='quant-divider'></div>", unsafe_allow_html=True)
 act_col1, act_col2 = st.columns([6, 4])
 
 with act_col1:
+    act_hdr_col1, act_hdr_col2 = st.columns([6, 4])
+    with act_hdr_col1:
+        st.markdown("""
+            <div style="font-size: 0.82rem; text-transform: uppercase; color: #E2E8F0; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 8px;">
+                Trading & Execution Activity
+            </div>
+        """, unsafe_allow_html=True)
+    with act_hdr_col2:
+        if st.button("⚡ Full Trading Terminal", key="btn_trading_tab_jump", type="secondary", use_container_width=True):
+            st.switch_page("pages/trading.py")
+
     tab_ord, tab_trd = st.tabs(["⚡ Recent Simulated Orders", "💰 Recent Executions"])
     with tab_ord:
         orders_df = get_orders(portfolio_id=active_port_id)
@@ -256,6 +280,56 @@ with act_col1:
     with tab_trd:
         trades_df = get_trades(portfolio_id=active_port_id)
         render_trades_table(trades_df.head(5))
+
+    # Quick Buy / Sell Execution Ticket directly on Overview
+    with st.expander("⚡ Quick Buy / Sell Order Entry", expanded=False):
+        securities_list = get_available_securities()
+        if securities_list:
+            q_c1, q_c2, q_c3 = st.columns([3, 2, 2])
+            with q_c1:
+                sec_opts = {f"{s['symbol']} ({s['security_name']})": s for s in securities_list}
+                q_sec_label = st.selectbox("Instrument", options=list(sec_opts.keys()), key="ov_quick_sec")
+                q_sec = sec_opts[q_sec_label]
+            with q_c2:
+                q_side = st.radio("Side", options=["BUY", "SELL"], horizontal=True, key="ov_quick_side")
+            with q_c3:
+                q_type = st.radio("Type", options=["MARKET", "LIMIT"], horizontal=True, key="ov_quick_type")
+
+            q_p1, q_p2 = st.columns(2)
+            quote = get_latest_quote(q_sec["symbol"]) or {"last_price": q_sec.get("base_price", 150.0)}
+            mark_p = float(quote.get("last_price", 150.0))
+            with q_p1:
+                q_qty = st.number_input("Shares", min_value=1, max_value=1000000, value=10, step=5, key="ov_quick_qty")
+            with q_p2:
+                if q_type == "LIMIT":
+                    q_prc = st.number_input("Limit Price ($)", min_value=0.01, value=float(round(mark_p, 2)), step=0.1, key="ov_quick_prc")
+                else:
+                    st.text_input("Estimated Exec Price ($)", value=f"~${mark_p:.2f} (MKT)", disabled=True, key="ov_quick_est")
+                    q_prc = float(round(mark_p, 2))
+
+            est_subtotal = q_qty * q_prc
+            st.markdown(f"""
+                <div style="font-size: 0.76rem; color: #94A3B8; font-family: 'JetBrains Mono', monospace; margin: 4px 0 10px 0;">
+                    Est. Value: <strong style="color: #F8FAFC;">{format_currency(est_subtotal)}</strong>
+                </div>
+            """, unsafe_allow_html=True)
+
+            btn_color_type = "primary" if q_side == "BUY" else "secondary"
+            if st.button(f"SUBMIT SIMULATED {q_side} ORDER", type=btn_color_type, use_container_width=True, key="ov_quick_submit"):
+                success, msg, _ = submit_simulated_order(
+                    portfolio_id=active_port_id,
+                    security_id=q_sec["security_id"],
+                    symbol=q_sec["symbol"],
+                    side=q_side,
+                    order_type=q_type,
+                    quantity=int(q_qty),
+                    price=float(q_prc)
+                )
+                if success:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
 
 with act_col2:
     st.markdown("""

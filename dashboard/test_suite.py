@@ -135,7 +135,7 @@ def run_all_tests():
     assert auth_service.get_current_role() == Role.USER, "Role should be USER"
     assert auth_service.check_page_access("Overview") is True, "User must have access to Overview"
     assert auth_service.check_page_access("Market Data") is True, "User must have access to Market Data"
-    assert auth_service.check_page_access("Trading") is False, "User must be restricted from Trading"
+    assert auth_service.check_page_access("Trading") is True, "User must have access to Trading"
     assert auth_service.check_page_access("Admin") is False, "User must be restricted from Admin"
     assert auth_service.check_page_access("Backtesting") is False, "User must be restricted from Backtesting"
 

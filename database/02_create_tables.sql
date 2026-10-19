@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
         'USER',
         'QUANT_TRADER',
         'QUANT_RESEARCHER',
+        'QUANT_DEVELOPER',
         'ADMIN',
         'SIMULATED_TRADER'
     ) NOT NULL,

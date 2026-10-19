@@ -173,183 +173,190 @@ if not bt_data:
     """, unsafe_allow_html=True)
     st.stop()
 
-summary = bt_data["summary"]
-df_equity = bt_data["equity_curve"]
-df_trades = bt_data["trades"]
-df_signals = bt_data["signals"]
 
-# -------------------------------------------------------------
-# 1. PERFORMANCE SUMMARY METRICS
-# -------------------------------------------------------------
-st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-st.markdown("""
-    <div style="font-size: 0.85rem; text-transform: uppercase; color: #E2E8F0; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 8px;">
-        Quantitative Performance Metrics
-    </div>
-""", unsafe_allow_html=True)
+def render_backtest_dashboard(bt_data: dict) -> None:
+    summary = bt_data["summary"]
+    df_equity = bt_data["equity_curve"]
+    df_trades = bt_data["trades"]
+    df_signals = bt_data["signals"]
 
-r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
-with r1_c1:
-    tot_ret = summary["total_return"]
-    render_metric_card(
-        title="TOTAL RETURN",
-        value=format_pct(tot_ret, precision=2, include_sign=True),
-        change=f"Final: {format_currency(summary['final_capital'])}",
-        is_positive=tot_ret >= 0,
-        description="Net Cumulative Alpha"
-    )
-with r1_c2:
-    tot_pnl = summary["total_pnl"]
-    render_metric_card(
-        title="TOTAL P&L",
-        value=format_pnl(tot_pnl),
-        change=f"Principal: {format_currency(summary['initial_capital'])}",
-        is_positive=tot_pnl >= 0,
-        description="Absolute Dollar Profit"
-    )
-with r1_c3:
-    render_metric_card(
-        title="CAGR",
-        value=format_pct(summary.get("cagr", 0.0), include_sign=True),
-        change="Annual Compound",
-        is_positive=summary.get("cagr", 0.0) >= 0,
-        description="Compound Annual Growth Rate"
-    )
-with r1_c4:
-    sharpe = summary["sharpe_ratio"]
-    render_metric_card(
-        title="SHARPE RATIO",
-        value=f"{sharpe:.2f}",
-        change=f"Profit Factor: {summary.get('profit_factor', 1.78):.2f}",
-        is_positive=sharpe >= 1.0,
-        description="Risk-adjusted Return (Rf=4%)"
-    )
-with r1_c5:
-    max_dd = summary["max_drawdown"]
-    render_metric_card(
-        title="MAX DRAWDOWN",
-        value=f"{max_dd:.2f}%",
-        change=f"Vol: {summary.get('volatility', 16.0):.1f}%",
-        is_positive=False if max_dd < -15 else None,
-        description="Maximum Peak-to-Trough Decline"
-    )
-
-st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
-
-r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns(5)
-with r2_c1:
-    render_metric_card(
-        title="TOTAL TRADES",
-        value=str(summary["total_trades"]),
-        change=f"Avg P&L: {format_pnl(summary.get('avg_trade_pnl', 0.0))}",
-        is_positive=None,
-        description="Executed Round-Trips"
-    )
-with r2_c2:
-    render_metric_card(
-        title="WIN RATE",
-        value=f"{summary['win_rate']:.1f}%",
-        change=f"{summary['winning_trades']}W / {summary['losing_trades']}L",
-        is_positive=summary["win_rate"] >= 50.0,
-        description="Winning Trade Ratio"
-    )
-with r2_c3:
-    render_metric_card(
-        title="AVERAGE TRADE P&L",
-        value=format_pnl(summary.get("avg_trade_pnl", 0.0)),
-        change="Per Trade Expectancy",
-        is_positive=summary.get("avg_trade_pnl", 0.0) >= 0,
-        description="Mathematical Edge"
-    )
-with r2_c4:
-    render_metric_card(
-        title="BEST TRADE",
-        value=format_pnl(summary.get("best_trade", 0.0)),
-        change="Max Single Gain",
-        is_positive=True,
-        description="Outlier Winner"
-    )
-with r2_c5:
-    render_metric_card(
-        title="WORST TRADE",
-        value=format_pnl(summary.get("worst_trade", 0.0)),
-        change="Max Single Loss",
-        is_positive=False,
-        description="Controlled Risk Event"
-    )
-
-st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
-
-# -------------------------------------------------------------
-# 2. CHARTS (Equity Curve, Drawdown, Daily Returns, Signals, Distribution)
-# -------------------------------------------------------------
-tab_c1, tab_c2, tab_c3, tab_c4, tab_c5 = st.tabs([
-    "📈 Equity Curve",
-    "📉 Underwater Drawdown",
-    "📊 Daily Returns",
-    "🎯 Entry / Exit Signals",
-    "🔔 Return Distribution"
-])
-
-with tab_c1:
-    render_backtest_signals_chart(
-        df_equity,
-        df_signals,
-        title=f"STRATEGY EQUITY TRAJECTORY VS S&P 500 BENCHMARK ({summary['symbol']})"
-    )
-
-with tab_c2:
-    render_drawdown_chart(
-        df_equity,
-        title="UNDERWATER DRAWDOWN PROFILE (%)"
-    )
-
-with tab_c3:
-    render_returns_chart(
-        df_equity,
-        title="DAILY ALGORITHMIC RETURN SERIES (%)"
-    )
-
-with tab_c4:
-    render_backtest_signals_chart(
-        df_equity,
-        df_signals,
-        title="EXECUTION SIGNALS & PRICE TRAJECTORY"
-    )
-
-with tab_c5:
-    render_return_distribution(
-        df_equity["daily_return"],
-        title="RETURN FREQUENCY DISTRIBUTION"
-    )
-
-st.markdown("<div class='quant-divider'></div>", unsafe_allow_html=True)
-
-# -------------------------------------------------------------
-# 3. TRADE ANALYSIS & LOG
-# -------------------------------------------------------------
-st.markdown("""
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <div style="font-size: 0.85rem; text-transform: uppercase; color: #E2E8F0; font-weight: 700; letter-spacing: 0.08em;">
-            Trade-By-Trade Simulation Log
+    # -------------------------------------------------------------
+    # 1. PERFORMANCE SUMMARY METRICS
+    # -------------------------------------------------------------
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+    st.markdown("""
+        <div style="font-size: 0.85rem; text-transform: uppercase; color: #E2E8F0; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 8px;">
+            Quantitative Performance Metrics
         </div>
-        <div style="font-size: 0.72rem; color: #64748B; font-family: 'JetBrains Mono', monospace;">
-            AUDIT TRAIL & EXECUTION OUTCOMES
+    """, unsafe_allow_html=True)
+
+    r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
+    with r1_c1:
+        tot_ret = summary["total_return"]
+        render_metric_card(
+            title="TOTAL RETURN",
+            value=format_pct(tot_ret, precision=2, include_sign=True),
+            change=f"Final: {format_currency(summary['final_capital'])}",
+            is_positive=tot_ret >= 0,
+            description="Net Cumulative Alpha"
+        )
+    with r1_c2:
+        tot_pnl = summary["total_pnl"]
+        render_metric_card(
+            title="TOTAL P&L",
+            value=format_pnl(tot_pnl),
+            change=f"Principal: {format_currency(summary['initial_capital'])}",
+            is_positive=tot_pnl >= 0,
+            description="Absolute Dollar Profit"
+        )
+    with r1_c3:
+        render_metric_card(
+            title="CAGR",
+            value=format_pct(summary.get("cagr", 0.0), include_sign=True),
+            change="Annual Compound",
+            is_positive=summary.get("cagr", 0.0) >= 0,
+            description="Compound Annual Growth Rate"
+        )
+    with r1_c4:
+        sharpe = summary["sharpe_ratio"]
+        render_metric_card(
+            title="SHARPE RATIO",
+            value=f"{sharpe:.2f}",
+            change=f"Profit Factor: {summary.get('profit_factor', 1.78):.2f}",
+            is_positive=sharpe >= 1.0,
+            description="Risk-adjusted Return (Rf=4%)"
+        )
+    with r1_c5:
+        max_dd = summary["max_drawdown"]
+        render_metric_card(
+            title="MAX DRAWDOWN",
+            value=f"{max_dd:.2f}%",
+            change=f"Vol: {summary.get('volatility', 16.0):.1f}%",
+            is_positive=False if max_dd < -15 else None,
+            description="Maximum Peak-to-Trough Decline"
+        )
+
+    st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+
+    r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns(5)
+    with r2_c1:
+        render_metric_card(
+            title="TOTAL TRADES",
+            value=str(summary["total_trades"]),
+            change=f"Avg P&L: {format_pnl(summary.get('avg_trade_pnl', 0.0))}",
+            is_positive=None,
+            description="Executed Round-Trips"
+        )
+    with r2_c2:
+        render_metric_card(
+            title="WIN RATE",
+            value=f"{summary['win_rate']:.1f}%",
+            change=f"{summary['winning_trades']}W / {summary['losing_trades']}L",
+            is_positive=summary["win_rate"] >= 50.0,
+            description="Winning Trade Ratio"
+        )
+    with r2_c3:
+        render_metric_card(
+            title="AVERAGE TRADE P&L",
+            value=format_pnl(summary.get("avg_trade_pnl", 0.0)),
+            change="Per Trade Expectancy",
+            is_positive=summary.get("avg_trade_pnl", 0.0) >= 0,
+            description="Mathematical Edge"
+        )
+    with r2_c4:
+        render_metric_card(
+            title="BEST TRADE",
+            value=format_pnl(summary.get("best_trade", 0.0)),
+            change="Max Single Gain",
+            is_positive=True,
+            description="Outlier Winner"
+        )
+    with r2_c5:
+        render_metric_card(
+            title="WORST TRADE",
+            value=format_pnl(summary.get("worst_trade", 0.0)),
+            change="Max Single Loss",
+            is_positive=False,
+            description="Controlled Risk Event"
+        )
+
+    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+
+    # -------------------------------------------------------------
+    # 2. CHARTS (Equity Curve, Drawdown, Daily Returns, Signals, Distribution)
+    # -------------------------------------------------------------
+    tab_c1, tab_c2, tab_c3, tab_c4, tab_c5 = st.tabs([
+        "📈 Equity Curve",
+        "📉 Underwater Drawdown",
+        "📊 Daily Returns",
+        "🎯 Entry / Exit Signals",
+        "🔔 Return Distribution"
+    ])
+
+    with tab_c1:
+        render_backtest_signals_chart(
+            df_equity,
+            df_signals,
+            title=f"STRATEGY EQUITY TRAJECTORY VS S&P 500 BENCHMARK ({summary['symbol']})"
+        )
+
+    with tab_c2:
+        render_drawdown_chart(
+            df_equity,
+            title="UNDERWATER DRAWDOWN PROFILE (%)"
+        )
+
+    with tab_c3:
+        render_returns_chart(
+            df_equity,
+            title="DAILY ALGORITHMIC RETURN SERIES (%)"
+        )
+
+    with tab_c4:
+        render_backtest_signals_chart(
+            df_equity,
+            df_signals,
+            title="EXECUTION SIGNALS & PRICE TRAJECTORY"
+        )
+
+    with tab_c5:
+        render_return_distribution(
+            df_equity["daily_return"],
+            title="RETURN FREQUENCY DISTRIBUTION"
+        )
+
+    st.markdown("<div class='quant-divider'></div>", unsafe_allow_html=True)
+
+    # -------------------------------------------------------------
+    # 3. TRADE ANALYSIS & LOG
+    # -------------------------------------------------------------
+    st.markdown("""
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div style="font-size: 0.85rem; text-transform: uppercase; color: #E2E8F0; font-weight: 700; letter-spacing: 0.08em;">
+                Trade-By-Trade Simulation Log
+            </div>
+            <div style="font-size: 0.72rem; color: #64748B; font-family: 'JetBrains Mono', monospace;">
+                AUDIT TRAIL & EXECUTION OUTCOMES
+            </div>
         </div>
-    </div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
-trade_filter = st.radio(
-    "Filter Trades",
-    options=["ALL TRADES", "WINNING TRADES ONLY", "LOSING TRADES ONLY"],
-    horizontal=True,
-    index=0
-)
+    trade_filter = st.radio(
+        "Filter Trades",
+        options=["ALL TRADES", "WINNING TRADES ONLY", "LOSING TRADES ONLY"],
+        horizontal=True,
+        index=0
+    )
 
-filtered_trades = df_trades.copy()
-if trade_filter == "WINNING TRADES ONLY":
-    filtered_trades = filtered_trades[filtered_trades["pnl"] > 0]
-elif trade_filter == "LOSING TRADES ONLY":
-    filtered_trades = filtered_trades[filtered_trades["pnl"] <= 0]
+    filtered_trades = df_trades.copy()
+    if trade_filter == "WINNING TRADES ONLY":
+        filtered_trades = filtered_trades[filtered_trades["pnl"] > 0]
+    elif trade_filter == "LOSING TRADES ONLY":
+        filtered_trades = filtered_trades[filtered_trades["pnl"] <= 0]
 
-render_backtest_results_table(filtered_trades)
+    render_backtest_results_table(filtered_trades)
+
+
+if bt_data and isinstance(bt_data, dict) and "summary" in bt_data:
+    render_backtest_dashboard(bt_data)
+

@@ -7,6 +7,7 @@ historical quote archives, and market microstructure analysis.
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
+# pyrefly: ignore[missing-import]
 import streamlit as st
 
 # Setup sys.path for clean imports
@@ -47,18 +48,23 @@ render_sidebar(current_page="Market Data")
 render_simulation_banner("Simulated Market Feeds • Historical & Microstructure Analytics")
 
 # Page Header
-st.markdown("""
-    <div style="margin-bottom: 16px;">
-        <div style="display: flex; align-items: baseline; gap: 10px;">
-            <h1 style="margin: 0; font-size: 1.75rem; font-weight: 800; color: #F8FAFC;">
-                MARKET DATA <span style="color: #06B6D4;">RESEARCH</span>
-            </h1>
-            <span style="color: #64748B; font-size: 0.90rem;">
-                Time-Series OHLCV & Microstructure Analysis
-            </span>
+hdr_col1, hdr_col2 = st.columns([8, 2])
+with hdr_col1:
+    st.markdown("""
+        <div style="margin-bottom: 16px;">
+            <div style="display: flex; align-items: baseline; gap: 10px;">
+                <h1 style="margin: 0; font-size: 1.75rem; font-weight: 800; color: #F8FAFC;">
+                    MARKET DATA <span style="color: #06B6D4;">RESEARCH</span>
+                </h1>
+                <span style="color: #64748B; font-size: 0.90rem;">
+                    Time-Series OHLCV & Microstructure Analysis
+                </span>
+            </div>
         </div>
-    </div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+with hdr_col2:
+    if st.button("⚡ Trade / Buy & Sell", key="btn_trade_from_market", type="primary", use_container_width=True):
+        st.switch_page("pages/trading.py")
 
 # -------------------------------------------------------------
 # TOP CONTROLS & FILTERS
