@@ -1,7 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-import { getAnalytics, isSupported } from 'firebase/analytics';
 
 export const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyDCVHrBCdpFCpIm_R3o-Zlse4gzvNafre8',
@@ -16,13 +14,8 @@ export const firebaseConfig = {
 // Initialize Firebase App singleton
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Firebase Services
+// Firebase Auth is the only browser service used for sign-in. Application roles
+// and user records are read from the authenticated API/MySQL profile.
 export const auth = getAuth(app);
-export const db = getFirestore(app);
-
-// Analytics (safely initialized in supported browser contexts)
-export const analyticsPromise = typeof window !== 'undefined'
-  ? isSupported().then((supported) => (supported ? getAnalytics(app) : null)).catch(() => null)
-  : Promise.resolve(null);
 
 export default app;

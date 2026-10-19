@@ -7,6 +7,7 @@ and provides the Sign Up registration and Email OTP verification workflows.
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional, Tuple
 import streamlit as st
 
@@ -153,6 +154,27 @@ def get_current_role() -> str:
     return normalize_role(st.session_state.get("role", Role.USER))
 
 
+def update_current_username(username: str) -> Tuple[bool, str]:
+    """Persist the signed-in user's username to the authoritative MySQL row."""
+    clean_username = (username or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_]{3,30}", clean_username):
+        return False, "Username must be 3-30 characters and use only letters, numbers, or underscores."
+    user_id = st.session_state.get("user_id")
+    if not is_authenticated() or not user_id:
+        return False, "Please sign in again before changing your username."
+    try:
+        repo = Repository()
+        repo.update_user_username(user_id, clean_username)
+        st.session_state["username"] = clean_username
+        return True, "Username saved to the QuantDB database."
+    except Exception as exc:
+        logger.warning("Could not update username for user_id=%s: %s", user_id, exc)
+        message = str(exc).lower()
+        if "duplicate" in message or "1062" in message:
+            return False, "That username is already taken. Choose another one."
+        return False, "Could not save the username. Check the MySQL connection and try again."
+
+
 ROLE_OPTION_MAP: Dict[str, str] = {
     "User": Role.USER,
     "Quant Trader": Role.QUANT_TRADER,
@@ -181,6 +203,16 @@ def login(identifier: str, password: str, selected_role: Optional[str] = None) -
 
     clean_id = identifier.strip()
 
+    # Pre-resolve username to email from MySQL repository
+    db_profile = None
+    try:
+        repo = Repository()
+        db_profile = repo.get_user_by_identifier(clean_id)
+        if db_profile and db_profile.get("email"):
+            clean_id = db_profile["email"]
+    except Exception as e:
+        logger.debug(f"Could not lookup user by identifier {clean_id}: {e}")
+
     # Prefer Firebase when configured. Firebase users sign in with email;
     # legacy MySQL accounts remain usable when Firebase is not configured.
     if firebase_auth.is_configured():
@@ -196,21 +228,27 @@ def login(identifier: str, password: str, selected_role: Optional[str] = None) -
             st.session_state["auth_screen"] = "signin"
             st.session_state["pending_verification"] = None
 
-            # Apply selected role override if chosen
-            if selected_role and selected_role in ROLE_OPTION_MAP:
-                chosen_role = ROLE_OPTION_MAP[selected_role]
-                st.session_state["role"] = chosen_role
-                st.session_state["role_display"] = get_role_display_name(chosen_role)
-
-            # Ensure user profile is mirrored in MySQL QuantDB
+            # Enrich from MySQL user record if available
             try:
                 repo = Repository()
-                existing = repo.get_user_by_email(user_info["email"])
-                final_role = st.session_state["role"]
-                if not existing:
+                existing = db_profile or repo.get_user_by_email(user_info["email"])
+                if existing:
+                    st.session_state["user_id"] = existing["user_id"]
+                    if existing.get("username"):
+                        st.session_state["username"] = existing["username"]
+                    if existing.get("name"):
+                        st.session_state["display_name"] = existing["name"]
+                    # MySQL is the authoritative source for app roles.
+                    if existing.get("role"):
+                        st.session_state["role"] = existing["role"]
+                        st.session_state["role_display"] = get_role_display_name(existing["role"])
+                else:
+                    final_role = Role.USER
+                    st.session_state["role"] = final_role
+                    st.session_state["role_display"] = get_role_display_name(final_role)
                     from src.auth.password import hash_password
                     uname = user_info["email"].split("@")[0]
-                    repo.create_user(
+                    database_user_id = repo.create_user(
                         username=uname,
                         name=user_info.get("name", uname),
                         email=user_info["email"],
@@ -218,12 +256,20 @@ def login(identifier: str, password: str, selected_role: Optional[str] = None) -
                         role=final_role,
                         status="ACTIVE",
                     )
-                elif selected_role:
-                    repo.update_user_role(existing["user_id"], final_role)
+                    st.session_state["user_id"] = database_user_id
                 from dashboard.services.analytics_service import clear_analytics_service_cache
                 clear_analytics_service_cache()
             except Exception as sync_err:
-                logger.debug(f"Login sync to MySQL: {sync_err}")
+                logger.exception("Firebase login could not synchronize with MySQL")
+                st.session_state["authenticated"] = False
+                st.session_state["user_id"] = None
+                st.session_state["role"] = None
+                st.session_state["role_display"] = None
+                return False, (
+                    "Your Firebase credentials are valid, but QuantDB MySQL is "
+                    "unavailable, so sign-in cannot complete. Check the database "
+                    "connection and retry."
+                )
 
             # Dispatch security login alert email to user asynchronously
             import threading
@@ -304,10 +350,6 @@ def login(identifier: str, password: str, selected_role: Optional[str] = None) -
                     st.session_state["email"] = mu["email"]
                     st.session_state["role"] = mu["role"]
                     st.session_state["role_display"] = get_role_display_name(mu["role"])
-                    if selected_role and selected_role in ROLE_OPTION_MAP:
-                        chosen_role = ROLE_OPTION_MAP[selected_role]
-                        st.session_state["role"] = chosen_role
-                        st.session_state["role_display"] = get_role_display_name(chosen_role)
                     return True, "Authentication successful (offline simulation)."
         return False, err_msg
     except Exception as e:
@@ -330,8 +372,7 @@ def signup(
     Auto-verifies and logs in user directly into the active session.
     When SMTP is configured: transitions to OTP verification.
     """
-    init_session_state()
-    # For system security: Public self-registration is strictly restricted to Role.USER
+    # Public signup is strictly restricted to Role.USER for system security.
     chosen_role = Role.USER
     if firebase_auth.is_configured():
         if not email or "@" not in email:
@@ -341,6 +382,9 @@ def signup(
         if password != confirm_password:
             return False, "Passwords do not match."
         try:
+            clean_username = (username or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9_]{3,30}", clean_username):
+                return False, "Username must be 3-30 characters and use only letters, numbers, or underscores."
             user_info = firebase_auth.sign_up(email=email, password=password, display_name=name)
             # Synchronously and reliably persist user profile into MySQL database
             try:
@@ -348,7 +392,7 @@ def signup(
                 from src.auth.password import hash_password
                 clean_email = email.strip().lower()
                 clean_name = (name or user_info.get("name", "")).strip() or clean_email.split("@")[0]
-                uname = clean_email.split("@")[0]
+                uname = clean_username
                 existing = repo.get_user_by_email(clean_email)
                 if not existing:
                     repo.create_user(
@@ -356,18 +400,23 @@ def signup(
                         name=clean_name,
                         email=clean_email,
                         password_hash=hash_password(password),
-                        role=chosen_role,
+                        role=Role.USER,
                         status="ACTIVE",
                     )
                 else:
-                    repo.update_user_role(existing["user_id"], chosen_role)
+                    repo.update_user_username(existing["user_id"], uname)
                     repo.update_user_status(existing["user_id"], "ACTIVE")
                     repo.update_user_verified(existing["user_id"], True)
                 
                 from dashboard.services.analytics_service import clear_analytics_service_cache
                 clear_analytics_service_cache()
             except Exception as sync_err:
-                logger.error(f"MySQL user sync error on sign up: {sync_err}")
+                logger.exception("MySQL user sync failed after Firebase signup")
+                return False, (
+                    "Firebase created the account, but it could not be saved to the "
+                    "QuantDB MySQL database. Check the database connection, then "
+                    "sign in again to retry synchronization."
+                )
 
             st.session_state["created_account_name"] = clean_name
             st.session_state["created_account_email"] = clean_email
@@ -800,14 +849,6 @@ def render_login_screen() -> None:
 
             tab_signin, tab_signup = st.tabs(["SIGN IN", "CREATE ACCOUNT"])
 
-            role_list = [
-                "User",
-                "Quant Trader",
-                "Quant Developer",
-                "Quant Researcher",
-                "Admin",
-            ]
-
             with tab_signin:
                 if st.session_state.get("account_created_msg"):
                     st.success(f"✅ {st.session_state.get('account_created_msg')}")
@@ -917,7 +958,7 @@ def render_login_screen() -> None:
                             password=reg_password,
                             confirm_password=reg_confirm_password,
                             phone=reg_phone,
-                            role="User",
+                            role=Role.USER,
                         )
                         if s_ok:
                             st.session_state["account_created_msg"] = s_msg

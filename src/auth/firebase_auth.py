@@ -183,13 +183,23 @@ def authenticate(identifier: str, password: str) -> Dict[str, Any]:
     project_id = _config("FIREBASE_PROJECT_ID", "quantdb-728ef")
     if not api_key:
         raise FirebaseAuthError("Firebase Authentication is not configured.")
-    if "@" not in identifier:
+    clean_identifier = identifier.strip()
+    if "@" not in clean_identifier:
+        try:
+            from src.database.repository import Repository
+            db_user = Repository().get_user_by_identifier(clean_identifier)
+            if db_user and db_user.get("email"):
+                clean_identifier = db_user["email"]
+        except Exception:
+            pass
+
+    if "@" not in clean_identifier:
         raise FirebaseAuthError("Firebase sign-in requires the account email address.")
 
     try:
         response = _post(
             f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={api_key}",
-            json={"email": identifier.strip(), "password": password, "returnSecureToken": True},
+            json={"email": clean_identifier, "password": password, "returnSecureToken": True},
             timeout=10,
         )
     except requests.RequestException as exc:
@@ -206,7 +216,7 @@ def authenticate(identifier: str, password: str) -> Dict[str, Any]:
 
     auth = response.json()
     uid = auth.get("localId")
-    email = auth.get("email", identifier.strip())
+    email = auth.get("email", clean_identifier)
     id_token = auth.get("idToken")
     role = Role.USER
     name = email.split("@", 1)[0]
@@ -236,7 +246,6 @@ def authenticate(identifier: str, password: str) -> Dict[str, Any]:
                 exc,
             )
 
-
     return {
         "user_id": uid,
         "username": email,
@@ -246,6 +255,7 @@ def authenticate(identifier: str, password: str) -> Dict[str, Any]:
         "role_display": {
             Role.USER: "User",
             Role.QUANT_TRADER: "Quant Trader",
+            Role.QUANT_DEVELOPER: "Quant Developer",
             Role.QUANT_RESEARCHER: "Quant Researcher",
             Role.ADMIN: "Admin",
         }.get(role, "User"),

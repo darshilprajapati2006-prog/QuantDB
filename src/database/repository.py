@@ -80,6 +80,13 @@ class Repository:
         finally:
             self._close_conn(conn)
 
+    def update_user_username(self, user_id: int, username: str):
+        conn = self._get_connection()
+        try:
+            return queries.update_user_username(conn, user_id, username)
+        finally:
+            self._close_conn(conn)
+
     def update_user_status(self, user_id: int, status: str):
         conn = self._get_connection()
         try:
@@ -331,9 +338,14 @@ class Repository:
         finally:
             self._close_conn(conn)
 
-    def get_trades(self, security_id: Optional[int] = None):
+    def get_trades(self, security_id: Optional[int] = None, user_id: Optional[int] = None):
         conn = self._get_connection()
         try:
+            if user_id is not None:
+                rows = queries.get_trades_by_user(conn, user_id)
+                if security_id is not None:
+                    rows = [row for row in rows if row.get("security_id") == security_id]
+                return rows
             if security_id is not None:
                 return queries.get_trades_by_security(
                     conn,

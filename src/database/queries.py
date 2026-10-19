@@ -105,6 +105,12 @@ SET role = %s
 WHERE user_id = %s;
 """
 
+UPDATE_USER_USERNAME = """
+UPDATE users
+SET username = %s
+WHERE user_id = %s;
+"""
+
 UPDATE_USER_STATUS = """
 UPDATE users
 SET status = %s
@@ -133,13 +139,19 @@ WHERE user_id = %s;
 
 CREATE_USER = """
 INSERT INTO users (
+    username,
     name,
     email,
     password_hash,
     role,
     status,
+    is_verified,
     created_at
-) VALUES (%s, %s, %s, %s, %s, %s);
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+ON DUPLICATE KEY UPDATE
+    name = VALUES(name),
+    status = 'ACTIVE',
+    is_verified = 1;
 """
 
 # ============================================================
@@ -384,6 +396,7 @@ GET_ORDERS_BY_USER = """
 SELECT
     o.order_id,
     o.user_id,
+    o.portfolio_id,
     o.security_id,
     s.symbol,
     o.order_type,
@@ -403,6 +416,7 @@ GET_ORDERS_BY_SECURITY = """
 SELECT
     o.order_id,
     o.user_id,
+    o.portfolio_id,
     o.security_id,
     s.symbol,
     o.order_type,
@@ -422,6 +436,7 @@ GET_ALL_ORDERS = """
 SELECT
     o.order_id,
     o.user_id,
+    o.portfolio_id,
     o.security_id,
     s.symbol,
     o.order_type,
@@ -494,6 +509,7 @@ GET_TRADES_BY_SECURITY = """
 SELECT
     t.trade_id,
     t.order_id,
+    o.portfolio_id,
     t.security_id,
     s.symbol,
     t.trade_side,
@@ -522,6 +538,26 @@ SELECT
 FROM trades t
 JOIN securities s
     ON t.security_id = s.security_id
+ORDER BY t.trade_time DESC;
+"""
+
+GET_TRADES_BY_USER = """
+SELECT
+    t.trade_id,
+    t.order_id,
+    o.portfolio_id,
+    t.security_id,
+    s.symbol,
+    t.trade_side,
+    t.quantity,
+    t.execution_price,
+    t.trade_time,
+    t.transaction_cost,
+    o.user_id
+FROM trades t
+JOIN orders o ON o.order_id = t.order_id
+JOIN securities s ON s.security_id = t.security_id
+WHERE o.user_id = %s
 ORDER BY t.trade_time DESC;
 """
 
@@ -1047,7 +1083,14 @@ def get_user_by_email(conn, email: str) -> Optional[Dict[str, Any]]:
 def get_user_by_username(conn, username: str) -> Optional[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
-        cursor.execute(GET_USER_BY_IDENTIFIER, (username, username, username, username, username))
+        cursor.execute(GET_USER_BY_USERNAME, (username, username))
+        row = cursor.fetchone()
+        if row:
+            return _normalize_user_dict(row)
+        cursor.execute(
+            GET_USER_BY_IDENTIFIER,
+            (username, username, username, username, username)
+        )
         return _normalize_user_dict(cursor.fetchone())
     finally:
         _close_cursor(cursor)
@@ -1056,7 +1099,10 @@ def get_user_by_username(conn, username: str) -> Optional[Dict[str, Any]]:
 def get_user_by_identifier(conn, identifier: str) -> Optional[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
-        cursor.execute(GET_USER_BY_IDENTIFIER, (identifier, identifier, identifier, identifier, identifier))
+        cursor.execute(
+            GET_USER_BY_IDENTIFIER,
+            (identifier, identifier, identifier, identifier, identifier)
+        )
         return _normalize_user_dict(cursor.fetchone())
     finally:
         _close_cursor(cursor)
@@ -1076,6 +1122,16 @@ def update_user_role(conn, user_id: int, role: str) -> bool:
     cursor = conn.cursor()
     try:
         cursor.execute(UPDATE_USER_ROLE, (role, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        _close_cursor(cursor)
+
+
+def update_user_username(conn, user_id: int, username: str) -> bool:
+    cursor = conn.cursor()
+    try:
+        cursor.execute(UPDATE_USER_USERNAME, (username, user_id))
         conn.commit()
         return cursor.rowcount > 0
     finally:
@@ -1178,7 +1234,7 @@ def create_user(
 
         cursor.execute(
             CREATE_USER,
-            (resolved_name, resolved_email, resolved_hash, resolved_role, resolved_status, now),
+            (uname, resolved_name, resolved_email, resolved_hash, resolved_role, resolved_status, bool(kwargs.get("is_verified", False)), now),
         )
         conn.commit()
         return cursor.lastrowid
@@ -1380,6 +1436,15 @@ def get_all_trades(conn) -> List[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(GET_ALL_TRADES)
+        return cursor.fetchall()
+    finally:
+        _close_cursor(cursor)
+
+
+def get_trades_by_user(conn, user_id: int) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_TRADES_BY_USER, (user_id,))
         return cursor.fetchall()
     finally:
         _close_cursor(cursor)

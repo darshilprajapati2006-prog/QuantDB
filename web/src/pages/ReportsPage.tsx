@@ -29,22 +29,17 @@ export function ReportsPage() {
   const risk = data?.risk || ({} as RiskMetrics);
   const backtest = data?.backtest || ({} as BacktestSummary);
 
-  const sharpe = Number(risk.sharpe_ratio ?? 1.84);
-  const sortino = Number(risk.sortino_ratio ?? 2.31);
-  const maxDd = Math.abs(Number(risk.max_drawdown ?? 6.85));
-  const vol = Number(risk.annualized_volatility ?? 14.2);
-  const beta = Number(risk.beta_vs_sp500 ?? 0.88);
-  const var95 = Number(risk.var_95_daily ?? -1.45);
+  const sortino = (risk as RiskMetrics & { sortino_ratio?: number }).sortino_ratio;
+  const maxDd = risk.max_drawdown;
+  const vol = risk.annualized_volatility;
+  const beta = risk.beta_vs_sp500;
+  const var95 = risk.var_95_daily;
 
   const handlePrint = () => {
     window.print();
   };
 
-  // Monthly return breakdown table (simulated monthly returns)
-  const monthlyData = [
-    { year: 2026, jan: '+2.4%', feb: '+1.8%', mar: '+3.1%', apr: '+0.9%', may: '—', jun: '—', jul: '—', aug: '—', sep: '—', oct: '—', nov: '—', dec: '—', ytd: '+8.4%' },
-    { year: 2025, jan: '+3.2%', feb: '-1.1%', mar: '+4.5%', apr: '+2.1%', may: '+1.4%', jun: '+0.8%', jul: '+2.9%', aug: '-0.7%', sep: '+1.6%', oct: '+3.4%', nov: '+2.0%', dec: '+1.5%', ytd: '+23.8%' },
-  ];
+  const monthlyData: Array<{ year: number; jan: string; feb: string; mar: string; apr: string; may: string; jun: string; jul: string; aug: string; sep: string; oct: string; nov: string; dec: string; ytd: string }> = [];
 
   return (
     <div className="space-y-6">
@@ -78,16 +73,16 @@ export function ReportsPage() {
               QUANTDB RESEARCH INITIATIVE · FACTOR STRATEGY REPORT
             </div>
             <h2 className="text-xl font-bold text-[#e8f1ed] mt-1 font-sans">
-              Systematic Equity Momentum & Mean Reversion Strategy
+              {backtest.strategy_name || 'Portfolio risk and performance summary'}
             </h2>
             <div className="text-xs text-[#708288] mt-1">
-              Benchmark: <b>S&P 500 Total Return Index</b> · Currency: <b>USD</b> · Period: <b>2025 - 2026</b>
+              QuantDB account metrics · Paper trading simulation
             </div>
           </div>
 
           <div className="text-right text-xs font-mono">
             <div className="text-[#84959b]">DATE GENERATED</div>
-            <div className="text-[#d8e3df] font-bold">OCTOBER 18, 2026</div>
+            <div className="text-[#d8e3df] font-bold">{new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }).toUpperCase()}</div>
           </div>
         </div>
 
@@ -96,33 +91,33 @@ export function ReportsPage() {
           <div className="bg-[#10171d] border border-[#1f2b33] rounded-lg p-3">
             <span className="text-[10px] font-mono text-[#6c7d84] block uppercase">Annualized Return</span>
             <span className="text-lg font-bold text-[#72d2ab] font-mono mt-1 block">
-              +18.42%
+              {backtest.total_return_pct == null ? '—' : `${Number(backtest.total_return_pct) >= 0 ? '+' : ''}${Number(backtest.total_return_pct).toFixed(2)}%`}
             </span>
-            <span className="text-[10px] text-[#78888e] font-mono">Alpha: +6.4%</span>
+            <span className="text-[10px] text-[#78888e] font-mono">Latest backtest return</span>
           </div>
 
           <div className="bg-[#10171d] border border-[#1f2b33] rounded-lg p-3">
             <span className="text-[10px] font-mono text-[#6c7d84] block uppercase">Sharpe Ratio</span>
             <span className="text-lg font-bold text-[#e5ecea] font-mono mt-1 block">
-              {sharpe.toFixed(2)}
+              {risk.sharpe_ratio == null ? '—' : Number(risk.sharpe_ratio).toFixed(2)}
             </span>
-            <span className="text-[10px] text-[#78888e] font-mono">Rf = 4.5%</span>
+            <span className="text-[10px] text-[#78888e] font-mono">from selected portfolio</span>
           </div>
 
           <div className="bg-[#10171d] border border-[#1f2b33] rounded-lg p-3">
             <span className="text-[10px] font-mono text-[#6c7d84] block uppercase">Maximum Drawdown</span>
             <span className="text-lg font-bold text-[#ea837c] font-mono mt-1 block">
-              −{maxDd.toFixed(2)}%
+              {maxDd == null ? '—' : `${Number(maxDd).toFixed(2)}%`}
             </span>
-            <span className="text-[10px] text-[#78888e] font-mono">14 days recov.</span>
+            <span className="text-[10px] text-[#78888e] font-mono">maximum peak-to-trough decline</span>
           </div>
 
           <div className="bg-[#10171d] border border-[#1f2b33] rounded-lg p-3">
             <span className="text-[10px] font-mono text-[#6c7d84] block uppercase">Win Rate / PF</span>
             <span className="text-lg font-bold text-[#e5ecea] font-mono mt-1 block">
-              62.5%
+              {backtest.win_rate_pct == null ? '—' : `${Number(backtest.win_rate_pct).toFixed(1)}%`}
             </span>
-            <span className="text-[10px] text-[#78888e] font-mono">Profit Factor: 2.14</span>
+            <span className="text-[10px] text-[#78888e] font-mono">Profit Factor: {backtest.profit_factor == null ? '—' : Number(backtest.profit_factor).toFixed(2)}</span>
           </div>
         </div>
 
@@ -153,6 +148,7 @@ export function ReportsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#1e2b33] bg-[#0c1216]">
+                {monthlyData.length === 0 && <tr><td colSpan={14} className="py-8 text-center text-[#778991]">Monthly portfolio return observations are not available yet.</td></tr>}
                 {monthlyData.map((row) => (
                   <tr key={row.year} className="hover:bg-[#10171d]">
                     <td className="py-2.5 px-3 text-left font-bold text-[#e5ecea]">{row.year}</td>
@@ -185,23 +181,23 @@ export function ReportsPage() {
             <div className="divide-y divide-[#182329] text-xs font-mono">
               <div className="py-2 flex justify-between">
                 <span className="text-[#728389]">Annualized Volatility</span>
-                <span className="text-[#d8e2df] font-medium">{vol.toFixed(1)}%</span>
+                <span className="text-[#d8e2df] font-medium">{vol == null ? '—' : `${Number(vol).toFixed(1)}%`}</span>
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-[#728389]">Downside Deviation</span>
-                <span className="text-[#d8e2df] font-medium">8.4%</span>
+                <span className="text-[#d8e2df] font-medium">—</span>
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-[#728389]">Sortino Ratio</span>
-                <span className="text-[#72d2ab] font-medium">{sortino.toFixed(2)}</span>
+                <span className="text-[#72d2ab] font-medium">{sortino == null ? '—' : Number(sortino).toFixed(2)}</span>
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-[#728389]">Value at Risk (95% 1-day)</span>
-                <span className="text-[#ea837c] font-medium">{var95.toFixed(2)}%</span>
+                <span className="text-[#ea837c] font-medium">{var95 == null ? '—' : `${Number(var95).toFixed(2)}%`}</span>
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-[#728389]">Calmar Ratio</span>
-                <span className="text-[#d8e2df] font-medium">2.68</span>
+                <span className="text-[#d8e2df] font-medium">—</span>
               </div>
             </div>
           </div>
@@ -213,23 +209,23 @@ export function ReportsPage() {
             <div className="divide-y divide-[#182329] text-xs font-mono">
               <div className="py-2 flex justify-between">
                 <span className="text-[#728389]">Beta vs Benchmark</span>
-                <span className="text-[#d8e2df] font-medium">{beta.toFixed(2)}</span>
+                <span className="text-[#d8e2df] font-medium">{beta == null ? '—' : Number(beta).toFixed(2)}</span>
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-[#728389]">R-Squared</span>
-                <span className="text-[#d8e2df] font-medium">0.82</span>
+                <span className="text-[#d8e2df] font-medium">—</span>
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-[#728389]">Information Ratio</span>
-                <span className="text-[#72d2ab] font-medium">1.42</span>
+                <span className="text-[#72d2ab] font-medium">—</span>
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-[#728389]">Tracking Error</span>
-                <span className="text-[#d8e2df] font-medium">4.1%</span>
+                <span className="text-[#d8e2df] font-medium">—</span>
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-[#728389]">Correlation</span>
-                <span className="text-[#d8e2df] font-medium">0.91</span>
+                <span className="text-[#d8e2df] font-medium">—</span>
               </div>
             </div>
           </div>

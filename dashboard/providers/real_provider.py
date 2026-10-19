@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
@@ -570,12 +571,13 @@ class RealProvider:
         self,
         portfolio_id: Optional[int] = None,
         status: Optional[str] = None,
+        user_id: Optional[int] = None,
     ) -> pd.DataFrame:
         """Retrieves orders from MySQL QuantDB via trading service / repository."""
         if not self.is_connected():
             raise ConnectionError("MySQL QuantDB is unavailable in REAL mode.")
 
-        orders = backend_get_orders(repo=self.repo)
+        orders = backend_get_orders(user_id=user_id, repo=self.repo)
         if not orders:
             return pd.DataFrame(
                 columns=[
@@ -595,6 +597,8 @@ class RealProvider:
         rows = []
         for o in orders:
             ord_dict = dict(o)
+            if portfolio_id is not None and int(ord_dict.get("portfolio_id") or -1) != int(portfolio_id):
+                continue
             o_status = ord_dict.get("order_status", "PENDING")
             if status is not None and o_status.upper() != status.upper():
                 continue
@@ -604,7 +608,7 @@ class RealProvider:
             rows.append(
                 {
                     "order_id": ord_dict.get("order_id"),
-                    "portfolio_id": portfolio_id or 1,
+                    "portfolio_id": ord_dict.get("portfolio_id") or portfolio_id,
                     "security_id": ord_dict.get("security_id"),
                     "symbol": ord_dict.get("symbol", "N/A"),
                     "timestamp": ts_str,
@@ -627,6 +631,7 @@ class RealProvider:
         order_type: str,
         quantity: int,
         price: float,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Submits and simulates filling an order via the Backend Trading Service."""
         if not self.is_connected():
@@ -635,7 +640,7 @@ class RealProvider:
         try:
             # 1. Create Order
             order = backend_create_order(
-                user_id=1,
+                user_id=user_id or 1,
                 security_id=security_id,
                 side=side,
                 order_type=order_type,
@@ -686,12 +691,12 @@ class RealProvider:
             logger.error(f"RealProvider.submit_order failed: {e}")
             return {"error": f"Order submission failed: {str(e)}"}
 
-    def get_trades(self, portfolio_id: Optional[int] = None) -> pd.DataFrame:
+    def get_trades(self, portfolio_id: Optional[int] = None, user_id: Optional[int] = None) -> pd.DataFrame:
         """Retrieves executed trades from MySQL QuantDB."""
         if not self.is_connected():
             raise ConnectionError("MySQL QuantDB is unavailable in REAL mode.")
 
-        trades = backend_get_trades(repo=self.repo)
+        trades = backend_get_trades(user_id=user_id, repo=self.repo)
         if not trades:
             return pd.DataFrame(
                 columns=[
@@ -711,12 +716,15 @@ class RealProvider:
         rows = []
         for t in trades:
             t_dict = dict(t)
+            if portfolio_id is not None and int(t_dict.get("portfolio_id") or -1) != int(portfolio_id):
+                continue
             ts = t_dict.get("trade_time")
             ts_str = ts.strftime("%Y-%m-%d %H:%M:%S") if isinstance(ts, datetime) else str(ts or "")
             rows.append(
                 {
                     "trade_id": t_dict.get("trade_id"),
                     "order_id": t_dict.get("order_id"),
+                    "portfolio_id": t_dict.get("portfolio_id") or portfolio_id,
                     "security_id": t_dict.get("security_id"),
                     "symbol": t_dict.get("symbol", "N/A"),
                     "timestamp": ts_str,
@@ -981,7 +989,9 @@ class RealProvider:
 
     def get_system_status(self) -> Dict[str, Any]:
         """Returns real-time health inspection of all platform components."""
+        started = time.perf_counter()
         is_live = self.is_connected()
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 1) if is_live else None
         return {
             "data_mode": "REAL",
             "backend_status": "Connected (src.services)" if is_live else "Offline (MySQL Unreachable)",
@@ -989,6 +999,7 @@ class RealProvider:
             "quant_engine_status": "Online (src.analytics & backtesting)" if is_live else "Offline",
             "version": "1.0.0-academic",
             "connected": is_live,
+            "database_latency_ms": elapsed_ms,
         }
 
     def get_risk_metrics(self, portfolio_id: int = 1) -> Dict[str, Any]:

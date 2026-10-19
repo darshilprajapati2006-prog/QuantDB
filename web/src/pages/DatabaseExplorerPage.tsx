@@ -23,46 +23,13 @@ interface TableResponse {
   records?: Record<string, unknown>[];
 }
 
-// Full sample schema records for tables when empty in development database
-const TABLE_SAMPLE_DATA: Record<string, Record<string, unknown>[]> = {
-  positions: [
-    { position_id: 1, portfolio_id: 1, security_id: 1, symbol: 'RELIANCE', quantity: 150, average_price: 2420.50, current_price: 2548.80, market_value: 382320.00, unrealized_pnl: 19245.00 },
-    { position_id: 2, portfolio_id: 1, security_id: 2, symbol: 'TCS', quantity: 80, average_price: 3410.00, current_price: 3620.25, market_value: 289620.00, unrealized_pnl: 16820.00 },
-    { position_id: 3, portfolio_id: 1, security_id: 3, symbol: 'HDFCBANK', quantity: 120, average_price: 1580.40, current_price: 1695.10, market_value: 203412.00, unrealized_pnl: 13764.00 },
-    { position_id: 4, portfolio_id: 1, security_id: 4, symbol: 'INFY', quantity: 95, average_price: 1450.20, current_price: 1532.50, market_value: 145587.50, unrealized_pnl: 7818.50 },
-    { position_id: 5, portfolio_id: 1, security_id: 5, symbol: 'ICICIBANK', quantity: 140, average_price: 990.00, current_price: 1045.30, market_value: 146342.00, unrealized_pnl: 7742.00 },
-  ],
-  risk_metrics: [
-    { metric_id: 1, portfolio_id: 1, calculation_date: '2026-03-31', sharpe_ratio: 1.84, sortino_ratio: 2.31, max_drawdown: 0.0685, annualized_volatility: 0.1420, beta_vs_sp500: 0.88, var_95_daily: -0.0145, cvar_95_daily: -0.0218 },
-    { metric_id: 2, portfolio_id: 2, calculation_date: '2026-03-31', sharpe_ratio: 1.42, sortino_ratio: 1.85, max_drawdown: 0.0920, annualized_volatility: 0.1780, beta_vs_sp500: 1.05, var_95_daily: -0.0182, cvar_95_daily: -0.0275 },
-  ],
-  backtests: [
-    { backtest_id: 1, strategy_id: 1, security_id: 1, symbol: 'RELIANCE', start_date: '2026-01-01', end_date: '2026-03-31', initial_capital: 100000.00, final_capital: 118420.00, total_return_pct: 18.42, status: 'COMPLETED' },
-    { backtest_id: 2, strategy_id: 2, security_id: 2, symbol: 'TCS', start_date: '2026-01-01', end_date: '2026-03-31', initial_capital: 100000.00, final_capital: 114250.00, total_return_pct: 14.25, status: 'COMPLETED' },
-  ],
-  backtest_results: [
-    { result_id: 1, backtest_id: 1, total_return_pct: 18.42, annualized_return_pct: 78.4, sharpe_ratio: 1.84, sortino_ratio: 2.31, max_drawdown_pct: 6.85, win_rate_pct: 62.5, total_trades: 48, profit_factor: 2.14 },
-    { result_id: 2, backtest_id: 2, total_return_pct: 14.25, annualized_return_pct: 61.2, sharpe_ratio: 1.55, sortino_ratio: 1.95, max_drawdown_pct: 8.40, win_rate_pct: 58.3, total_trades: 36, profit_factor: 1.85 },
-  ],
-  vw_portfolio_positions: [
-    { portfolio_id: 1, portfolio_name: 'Main Equity Growth', symbol: 'RELIANCE', security_name: 'Reliance Industries Ltd.', quantity: 150, current_price: 2548.80, market_value: 382320.00, unrealized_pnl: 19245.00 },
-    { portfolio_id: 1, portfolio_name: 'Main Equity Growth', symbol: 'TCS', security_name: 'Tata Consultancy Services', quantity: 80, current_price: 3620.25, market_value: 289620.00, unrealized_pnl: 16820.00 },
-  ],
-  vw_risk_metrics: [
-    { portfolio_id: 1, portfolio_name: 'Main Equity Growth', sharpe_ratio: 1.84, sortino_ratio: 2.31, max_drawdown: 0.0685, annualized_volatility: 0.1420, var_95_daily: -0.0145 },
-  ],
-  vw_backtest_performance: [
-    { backtest_id: 1, strategy_name: 'Dual Moving Average Crossover', symbol: 'RELIANCE', total_return_pct: 18.42, sharpe_ratio: 1.84, max_drawdown_pct: 6.85, win_rate_pct: 62.5 },
-  ],
-};
-
 export function DatabaseExplorerPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'BASE TABLE' | 'VIEW'>('ALL');
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
 
   // Fetch tables metadata
-  const { data: tables = [], isLoading, refetch, isFetching } = useQuery({
+  const { data: tables = [], isLoading, refetch, isFetching, isError } = useQuery({
     queryKey: ['database-tables'],
     queryFn: () => request<TableMeta[]>('/database/tables'),
   });
@@ -87,8 +54,8 @@ export function DatabaseExplorerPage() {
   }, [tables]);
 
   // Safely extract table rows as an array
-  const { displayRows, isSynthetic } = useMemo(() => {
-    if (!selectedTable) return { displayRows: [], isSynthetic: false };
+  const { displayRows } = useMemo(() => {
+    if (!selectedTable) return { displayRows: [] };
 
     let fetchedRows: Record<string, unknown>[] = [];
     const data = rawQuery.data;
@@ -100,16 +67,9 @@ export function DatabaseExplorerPage() {
     }
 
     if (fetchedRows.length > 0) {
-      return { displayRows: fetchedRows, isSynthetic: false };
+      return { displayRows: fetchedRows };
     }
-
-    // If live table currently has 0 rows, provide rich schema content
-    const sample = TABLE_SAMPLE_DATA[selectedTable];
-    if (sample && sample.length > 0) {
-      return { displayRows: sample, isSynthetic: true };
-    }
-
-    return { displayRows: [], isSynthetic: false };
+    return { displayRows: [] };
   }, [selectedTable, rawQuery.data]);
 
   const columns = useMemo(() => {
@@ -124,11 +84,11 @@ export function DatabaseExplorerPage() {
         <div>
           <div className="eyebrow">
             <span className="pulse" />
-            RELATIONAL REPOSITORY <span className="eyebrow-sep">/</span> AIVEN CLOUD MYSQL
+            RELATIONAL REPOSITORY <span className="eyebrow-sep">/</span> DATABASE
           </div>
           <h1>Database Schema & Tables Explorer</h1>
           <p>
-            Real-time inspection of 21 relational tables, tick archives, position ledgers, and database views.
+            Browse the schema and records available to the connected API account.
           </p>
         </div>
 
@@ -147,14 +107,14 @@ export function DatabaseExplorerPage() {
           <div>
             <div className="flex items-center gap-3">
               <span className="text-sm font-semibold text-[#e5ecea] font-mono">
-                Aiven Cloud MySQL 8.0
+                QuantDB Database
               </span>
               <span className="text-xs font-mono px-2.5 py-0.5 rounded-md bg-[#152720] text-[#71d2aa] border border-[#234737] flex items-center gap-1.5 font-medium">
-                <span className="w-2 h-2 rounded-full bg-[#71d2aa] animate-pulse" /> CONNECTED & VERIFIED
+                <span className={`w-2 h-2 rounded-full ${isError ? 'bg-[#ea837c]' : 'bg-[#71d2aa]'} animate-pulse`} /> {isError ? 'CONNECTION ERROR' : 'API STATUS'}
               </span>
             </div>
             <div className="text-xs text-[#788a91] font-mono mt-1">
-              quantdb-mysql-darshilprajapati2006-a582.d.aivencloud.com:14328 · DB: <b className="text-[#d8e8e3]">QuantDB</b>
+              Database access is managed by the server
             </div>
           </div>
         </div>
@@ -210,7 +170,7 @@ export function DatabaseExplorerPage() {
       {/* Tables Grid */}
       {isLoading ? (
         <div className="panel py-20 text-center text-[#7e9096] text-xs font-mono">
-          Loading tables from Aiven MySQL database...
+          Loading database tables through QuantDB API...
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
@@ -276,11 +236,7 @@ export function DatabaseExplorerPage() {
                     {displayRows.length} RECORDS DISPLAYED
                   </span>
                 </div>
-                <div className="text-xs text-[#73868d] mt-0.5">
-                  {isSynthetic
-                    ? 'Table currently has 0 live rows in Aiven — displaying validated relational schema and demo records.'
-                    : 'Records fetched live directly from Aiven Cloud MySQL.'}
-                </div>
+                <div className="text-xs text-[#73868d] mt-0.5">Rows fetched from the connected database.</div>
               </div>
             </div>
 
@@ -355,7 +311,7 @@ export function DatabaseExplorerPage() {
       )}
 
       <div className="disclaimer">
-        <ShieldCheck size={14} /> QuantDB Database Explorer uses SSL encrypted connection strings directly to Aiven MySQL Cloud.
+        <ShieldCheck size={14} /> Database records are read by the API; connection credentials stay on the server.
       </div>
     </div>
   );

@@ -72,7 +72,7 @@ export function SecuritiesPage() {
             </span>
           </h1>
           <p>
-            Relational catalog of tradable equities, ETFs, and market indices stored in Aiven Cloud MySQL.
+            Tradable equities, ETFs, and market indices returned by the selected data provider.
           </p>
         </div>
       </div>
@@ -140,7 +140,7 @@ export function SecuritiesPage() {
               {secLoading ? (
                 <tr>
                   <td colSpan={7} className="py-8 text-center text-[#718087]">
-                    Loading instruments from Aiven MySQL...
+                    Loading instruments from QuantDB API...
                   </td>
                 </tr>
               ) : filteredSecurities.length === 0 ? (

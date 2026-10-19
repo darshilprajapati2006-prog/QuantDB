@@ -204,6 +204,7 @@ def get_orders(
 
 
 def get_trades(
+    user_id: Optional[int] = None,
     security_id: Optional[int] = None,
     order_id: Optional[int] = None,
     repo: Optional[Any] = None,
@@ -213,7 +214,7 @@ def get_trades(
     """
     if repo is not None:
         try:
-            db_trades = repo.get_trades(security_id=security_id)
+            db_trades = repo.get_trades(security_id=security_id, user_id=user_id)
             if db_trades:
                 if order_id is not None:
                     db_trades = [t for t in db_trades if t.get("order_id") == order_id]
@@ -222,7 +223,13 @@ def get_trades(
             pass
 
     results = []
+    if user_id is not None:
+        owned_order_ids = {o.order_id for o in _simulated_orders if o.user_id == user_id}
+    else:
+        owned_order_ids = None
     for t in _simulated_trades:
+        if owned_order_ids is not None and t.order_id not in owned_order_ids:
+            continue
         if security_id is not None and t.security_id != security_id:
             continue
         if order_id is not None and t.order_id != order_id:
