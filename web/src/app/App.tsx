@@ -72,12 +72,17 @@ const pathTitles: Record<string, string> = {
 
 const fallback: OverviewData = { market: [], portfolios: [], health: {}, risk: {}, backtest: {} };
 
-function initials(name: string) { return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'Q'; }
+function initials(name?: string) {
+  if (!name) return 'QD';
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'QD';
+}
 
-function pageAllowed(profile: UserProfile, page: string) {
-  if (page === 'System Health') return profile.role === 'ADMIN';
-  if (page === 'Database Explorer') return profile.role === 'ADMIN';
-  return profile.allowed_pages.some((item) => item.toLowerCase() === page.toLowerCase());
+function pageAllowed(profile?: UserProfile | null, page?: string) {
+  if (!profile || !page) return false;
+  if (profile.role === 'ADMIN') return true;
+  if (page === 'System Health' || page === 'Database Explorer') return profile.role === 'ADMIN';
+  const allowed = profile.allowed_pages || [];
+  return allowed.some((item) => item?.toLowerCase() === page.toLowerCase());
 }
 
 function LoadingScreen({ label = 'Loading your workspace…' }: { label?: string }) {
@@ -122,8 +127,8 @@ function App() {
     queryFn: () => request<OverviewData>('/overview'),
   });
 
-  const h = data.health as Health;
-  const quotes = data.market || [];
+  const h = (data?.health || {}) as Health;
+  const quotes = data?.market || [];
   const currentTitle = pathTitles[location.pathname] || 'Research Workspace';
 
   return (
@@ -175,20 +180,20 @@ function App() {
         })}
 
         <div className="sidebar-bottom">
-          {profile.role !== 'ADMIN' && <AccountRoleRequest />}
+          {profile?.role !== 'ADMIN' && <AccountRoleRequest />}
           <NavLink to="/health" className="mode-card block hover:border-[#3b574a] transition">
             <span className="status-dot" />
             <div>
-              <b>{h.data_mode || 'REAL'} MODE</b>
-              <small>{h.database_status || 'Database status pending'}</small>
+              <b>{h?.data_mode || 'REAL'} MODE</b>
+              <small>{h?.database_status || 'Database status ready'}</small>
             </div>
             <ChevronDown size={14} />
           </NavLink>
           <div className="user-row">
-            <div className="avatar">{initials(profile.name)}</div>
+            <div className="avatar">{initials(profile?.name)}</div>
             <div>
-              <b>{profile.name}</b>
-              <small>{profile.role_display}</small>
+              <b>{profile?.name || 'QuantDB User'}</b>
+              <small>{profile?.role_display || profile?.role || 'User'}</small>
             </div>
             <button className="signout-icon" aria-label="Sign out" title="Sign out" onClick={() => void auth.signOutUser()}><ChevronDown size={15}/></button>
           </div>
@@ -210,7 +215,7 @@ function App() {
           <div className="top-actions">
             <div className="market-status">
               <span className="status-dot" />
-              {h.data_mode === 'MOCK' ? 'SIMULATION' : h.connected === false ? 'DB OFFLINE' : 'REAL DATA'} <i>·</i> QUANTDB
+              {h?.data_mode === 'MOCK' ? 'SIMULATION' : h?.connected === false ? 'DB OFFLINE' : 'REAL DATA'} <i>·</i> QUANTDB
             </div>
             <button className="search-box">
               <Search size={15} />
@@ -221,7 +226,7 @@ function App() {
               <Bell size={18} />
               <i />
             </button>
-            <button className="top-avatar" aria-label="Sign out" title={`${profile.name} · Sign out`} onClick={() => void auth.signOutUser()}>{initials(profile.name)}</button>
+            <button className="top-avatar" aria-label="Sign out" title={`${profile?.name || 'User'} · Sign out`} onClick={() => void auth.signOutUser()}>{initials(profile?.name)}</button>
           </div>
         </header>
 

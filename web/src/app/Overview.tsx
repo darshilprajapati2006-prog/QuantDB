@@ -36,14 +36,18 @@ export default function Overview({
     enabled: securityId > 0 && Boolean(symbol),
   });
   const chartData = series.map((point) => ({ d: new Date(point.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), value: Number(point.close_price) }));
-  const investedPct = total > 0 ? invested / total * 100 : 0;
-  const cashPct = total > 0 ? cash / total * 100 : 0;
+  const h = (data?.health || {}) as Health;
+  const risk = (data?.risk || {}) as Record<string, number>;
+  const investedPct = total > 0 ? (invested / total) * 100 : 0;
+  const cashPct = total > 0 ? (cash / total) * 100 : 0;
   const cards: Array<[string, string, string, string, boolean | null]> = [
-    ['PORTFOLIO VALUE', portfolio ? money(total) : '—', portfolio ? `${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(2)}%` : '—', data.health.data_mode === 'MOCK' ? 'simulated account' : 'database portfolio', portfolio ? returnPct >= 0 : null],
+    ['PORTFOLIO VALUE', portfolio ? money(total) : '—', portfolio ? `${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(2)}%` : '—', h.data_mode === 'MOCK' ? 'simulated account' : 'database portfolio', portfolio ? returnPct >= 0 : null],
     ['TOTAL P&L', portfolio ? money(Number(portfolio.total_pnl ?? 0)) : '—', 'from database', 'realized + unrealized', portfolio ? Number(portfolio.total_pnl ?? 0) >= 0 : null],
     ['INVESTED', portfolio ? money(invested) : '—', portfolio && total ? `${(invested / total * 100).toFixed(1)}%` : '—', 'of portfolio value', null],
     ['CASH BALANCE', portfolio ? money(cash) : '—', portfolio && total ? `${(cash / total * 100).toFixed(1)}%` : '—', 'available to deploy', null],
   ];
+
+  const firstName = profile?.name ? profile.name.trim().split(/\s+/)[0] : 'Trader';
 
   return (
     <>
@@ -54,14 +58,14 @@ export default function Overview({
             {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).toUpperCase()} <span className="eyebrow-sep">/</span> MARKET OVERVIEW
           </div>
           <h1>
-            Welcome, {profile.name.split(' ')[0]} <span className="wave">✳</span>
+            Welcome, {firstName} <span className="wave">✳</span>
           </h1>
           <p>
             Your quantitative research workspace is ready. Here’s your latest portfolio snapshot.
           </p>
         </div>
         <NavLink to="/health" className="outline-button">
-          <span className="status-dot" /> {data.health.data_mode === 'MOCK' ? 'Simulation mode' : data.health.connected === false ? 'Database offline' : 'Database mode'} <ChevronDown size={14} />
+          <span className="status-dot" /> {h.data_mode === 'MOCK' ? 'Simulation mode' : h.connected === false ? 'Database offline' : 'Database mode'} <ChevronDown size={14} />
         </NavLink>
       </div>
 
@@ -255,17 +259,17 @@ export default function Overview({
               <h2>System health</h2>
             </div>
             <span className="all-systems">
-              <i /> {data.health.connected === false ? 'DEGRADED' : data.health.connected === true ? 'OPERATIONAL' : 'CHECKING'}
+              <i /> {h.connected === false ? 'DEGRADED' : h.connected === true ? 'OPERATIONAL' : 'CHECKING'}
             </span>
           </div>
           <HealthRow
             title="Database"
-            sub={data.health.database_status || 'Database status reported by QuantDB API'}
-            status={data.health.connected === false ? 'Offline' : data.health.connected === true ? 'Connected' : 'Unknown'}
-            good={data.health.connected === true}
+            sub={h.database_status || 'Database status reported by QuantDB API'}
+            status={h.connected === false ? 'Offline' : h.connected === true ? 'Connected' : 'Unknown'}
+            good={h.connected === true}
           />
-          <HealthRow title="Backend API" sub={data.health.backend_status || 'FastAPI · QuantDB'} status={error ? 'Unavailable' : 'Connected'} good={!error} />
-          <HealthRow title="Quant engine" sub={data.health.quant_engine_status || 'Analytics and backtesting'} status={data.health.quant_engine_status ? 'Ready' : 'Unknown'} good={Boolean(data.health.quant_engine_status)} />
+          <HealthRow title="Backend API" sub={h.backend_status || 'FastAPI · QuantDB'} status={error ? 'Unavailable' : 'Connected'} good={!error} />
+          <HealthRow title="Quant engine" sub={h.quant_engine_status || 'Analytics and backtesting'} status={h.quant_engine_status ? 'Ready' : 'Unknown'} good={Boolean(h.quant_engine_status)} />
           <div className="system-foot">
             <span>Last checked just now</span>
             <NavLink to="/health">
@@ -310,26 +314,26 @@ export default function Overview({
           </div>
           <div className="risk-main">
             <div>
-              <strong>{data.risk.sharpe_ratio == null ? '—' : Number(data.risk.sharpe_ratio).toFixed(2)}</strong>
+              <strong>{risk.sharpe_ratio == null ? '—' : Number(risk.sharpe_ratio).toFixed(2)}</strong>
               <span>Sharpe ratio</span>
             </div>
             <span className="risk-badge">RISK</span>
           </div>
           <div className="risk-meter">
-            <i style={{ width: `${Math.max(0, Math.min(100, Math.abs(Number(data.risk.max_drawdown || 0)) * 4))}%` }} />
+            <i style={{ width: `${Math.max(0, Math.min(100, Math.abs(Number(risk.max_drawdown || 0)) * 4))}%` }} />
           </div>
           <div className="risk-stats">
             <div>
               <span>Volatility</span>
-              <b>{data.risk.annualized_volatility == null ? '—' : `${Number(data.risk.annualized_volatility).toFixed(1)}%`}</b>
+              <b>{risk.annualized_volatility == null ? '—' : `${Number(risk.annualized_volatility).toFixed(1)}%`}</b>
             </div>
             <div>
               <span>Max drawdown</span>
-              <b className="negative">{data.risk.max_drawdown == null ? '—' : `${Number(data.risk.max_drawdown).toFixed(1)}%`}</b>
+              <b className="negative">{risk.max_drawdown == null ? '—' : `${Number(risk.max_drawdown).toFixed(1)}%`}</b>
             </div>
             <div>
               <span>Daily VaR (95%)</span>
-              <b>{data.risk.var_95_daily == null ? '—' : `${Number(data.risk.var_95_daily).toFixed(2)}%`}</b>
+              <b>{risk.var_95_daily == null ? '—' : `${Number(risk.var_95_daily).toFixed(2)}%`}</b>
             </div>
           </div>
         </section>

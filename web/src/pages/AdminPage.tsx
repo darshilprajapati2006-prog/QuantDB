@@ -20,7 +20,7 @@ export function AdminPage() {
     mutationFn: ({ userId, role }: { userId: number; role: string }) => request(`/admin/users/${userId}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }),
     onSuccess: () => { setNotice('Role saved. Access rules apply on the next request.'); setDrafts({}); void client.invalidateQueries({ queryKey: ['admin-users'] }); },
   });
-  const filtered = useMemo(() => users.filter((user) => `${user.name} ${user.username} ${user.email}`.toLowerCase().includes(search.toLowerCase())), [users, search]);
+  const filtered = useMemo(() => users.filter((user) => `${user?.name || ''} ${user?.username || ''} ${user?.email || ''}`.toLowerCase().includes(search.toLowerCase())), [users, search]);
 
   return <div className="space-y-6">
     <div className="page-heading"><div><div className="eyebrow"><span className="pulse"/> PLATFORM GOVERNANCE <span className="eyebrow-sep">/</span> ADMIN</div><h1>User & Role Management</h1><p>Review verified accounts and control access to QuantDB research modules.</p></div><button className="outline-button" onClick={() => { setNotice(''); void refetch(); }}><RefreshCw size={14} className={isFetching ? 'animate-spin' : ''}/> Refresh users</button></div>
