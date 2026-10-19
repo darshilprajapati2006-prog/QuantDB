@@ -18,6 +18,7 @@ export type Quote = {
 
 export type Health = {
   data_mode?: string;
+  database_latency_ms?: number | null;
   backend_status?: string;
   database_status?: string;
   quant_engine_status?: string;

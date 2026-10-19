@@ -20,12 +20,12 @@ export function TradingPage() {
   const qc = useQueryClient();
 
   // Form states
-  const [portfolioId, setPortfolioId] = useState<number>(1);
-  const [securityId, setSecurityId] = useState<number>(1);
+  const [portfolioId, setPortfolioId] = useState<number>(0);
+  const [securityId, setSecurityId] = useState<number>(0);
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
   const [orderType, setOrderType] = useState<'MARKET' | 'LIMIT'>('MARKET');
   const [quantity, setQuantity] = useState<number>(10);
-  const [price, setPrice] = useState<number>(2400.0);
+  const [price, setPrice] = useState<number>(0);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Queries
@@ -49,28 +49,22 @@ export function TradingPage() {
     queryFn: () => request<Trade[]>('/trades'),
   });
 
-  const DEFAULT_ORDERS: Order[] = [
-    { order_id: 101, security_id: 1, symbol: 'RELIANCE', side: 'BUY', order_type: 'MARKET', quantity: 50, price: 2420.50, status: 'FILLED', order_time: '2026-03-30 10:15:22' },
-    { order_id: 102, security_id: 2, symbol: 'TCS', side: 'BUY', order_type: 'LIMIT', quantity: 25, price: 3410.00, status: 'FILLED', order_time: '2026-03-30 11:42:05' },
-    { order_id: 103, security_id: 3, symbol: 'HDFCBANK', side: 'BUY', order_type: 'MARKET', quantity: 70, price: 1580.40, status: 'FILLED', order_time: '2026-03-31 09:20:14' },
-    { order_id: 104, security_id: 4, symbol: 'INFY', side: 'BUY', order_type: 'LIMIT', quantity: 40, price: 1450.20, status: 'FILLED', order_time: '2026-03-31 14:05:50' },
-  ];
-  const orders = (rawOrders.data && rawOrders.data.length > 0) ? rawOrders.data : DEFAULT_ORDERS;
+  const orders = rawOrders.data || [];
   const refetchOrders = rawOrders.refetch;
   const ordersFetching = rawOrders.isFetching;
 
-  const DEFAULT_TRADES: Trade[] = [
-    { trade_id: 201, order_id: 101, security_id: 1, symbol: 'RELIANCE', side: 'BUY', quantity: 50, execution_price: 2420.50, timestamp: '2026-03-30 10:15:23', transaction_cost: 60.51 },
-    { trade_id: 202, order_id: 102, security_id: 2, symbol: 'TCS', side: 'BUY', quantity: 25, execution_price: 3410.00, timestamp: '2026-03-30 11:42:06', transaction_cost: 42.62 },
-    { trade_id: 203, order_id: 103, security_id: 3, symbol: 'HDFCBANK', side: 'BUY', quantity: 70, execution_price: 1580.40, timestamp: '2026-03-31 09:20:15', transaction_cost: 55.31 },
-    { trade_id: 204, order_id: 104, security_id: 4, symbol: 'INFY', side: 'BUY', quantity: 40, execution_price: 1450.20, timestamp: '2026-03-31 14:05:51', transaction_cost: 29.00 },
-  ];
-  const trades = (rawTrades.data && rawTrades.data.length > 0) ? rawTrades.data : DEFAULT_TRADES;
+  const trades = rawTrades.data || [];
   const refetchTrades = rawTrades.refetch;
   const tradesFetching = rawTrades.isFetching;
 
   const activePort = portfolios.find((p) => p.portfolio_id === portfolioId) || portfolios[0];
   const activeSec = securities.find((s) => s.security_id === securityId) || securities[0];
+  React.useEffect(() => {
+    if (portfolios.length && !portfolios.some((item) => item.portfolio_id === portfolioId)) setPortfolioId(portfolios[0].portfolio_id);
+  }, [portfolios, portfolioId]);
+  React.useEffect(() => {
+    if (securities.length && !securities.some((item) => item.security_id === securityId)) setSecurityId(securities[0].security_id);
+  }, [securities, securityId]);
 
   // Update default price when security changes
   React.useEffect(() => {
@@ -85,28 +79,23 @@ export function TradingPage() {
   // Submit order mutation
   const submitOrder = useMutation({
     mutationFn: async () => {
-      const response = await fetch('/api/v1/orders', {
+      return request<Order>('/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           portfolio_id: portfolioId,
-          security_id: activeSec?.security_id || 1,
-          symbol: activeSec?.symbol || 'RELIANCE',
+          security_id: activeSec?.security_id,
+          symbol: activeSec?.symbol,
           side,
           order_type: orderType,
           quantity: Number(quantity),
           price: Number(price),
         }),
       });
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
-      return response.json();
     },
     onSuccess: (data) => {
       setMessage({
         type: 'success',
-        text: `Order #${data.order_id || 'NEW'} executed successfully in Aiven MySQL! Filled ${quantity} ${activeSec?.symbol} @ $${price.toFixed(2)}.`,
+        text: `Order #${data.order_id || 'NEW'} accepted by QuantDB. ${quantity} ${activeSec?.symbol} @ $${price.toFixed(2)}.`,
       });
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['trades'] });
@@ -134,7 +123,7 @@ export function TradingPage() {
           </div>
           <h1>Simulated Trading Desk & Order Blotter</h1>
           <p>
-            Place simulated market and limit orders backed by real-time transactions & triggers in Aiven Cloud MySQL.
+            Place simulated market and limit orders using the selected data provider.
           </p>
         </div>
 
@@ -328,14 +317,14 @@ export function TradingPage() {
                 setMessage(null);
                 submitOrder.mutate();
               }}
-              disabled={submitOrder.isPending}
+              disabled={submitOrder.isPending || !activePort || !activeSec || quantity <= 0 || price <= 0}
               className={`w-full py-3 rounded-md text-xs font-mono font-bold tracking-wider uppercase transition ${
                 side === 'BUY'
                   ? 'bg-gradient-to-r from-[#10B981] to-[#059669] hover:from-[#34D399] hover:to-[#10B981] text-[#0B1015]'
                   : 'bg-gradient-to-r from-[#EF4444] to-[#DC2626] hover:from-[#F87171] hover:to-[#EF4444] text-[#FFFFFF]'
               }`}
             >
-              {submitOrder.isPending ? 'Executing Transaction in Aiven...' : `Submit ${side} Order`}
+              {submitOrder.isPending ? 'Submitting paper order…' : `Submit ${side} Order`}
             </button>
 
             {message && (

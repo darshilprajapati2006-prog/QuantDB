@@ -45,10 +45,10 @@ interface BacktestResultData {
 
 export function BacktestingPage() {
   // Form parameters
-  const [strategyId, setStrategyId] = useState<number>(1);
-  const [securityId, setSecurityId] = useState<number>(1);
-  const [startDate, setStartDate] = useState('2026-01-01');
-  const [endDate, setEndDate] = useState('2026-03-31');
+  const [strategyId, setStrategyId] = useState<number>(0);
+  const [securityId, setSecurityId] = useState<number>(0);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [initialCapital, setInitialCapital] = useState<number>(100000);
   const [slippagePct, setSlippagePct] = useState<number>(0.05);
 
@@ -74,12 +74,17 @@ export function BacktestingPage() {
 
   const activeSec = securities.find((s) => s.security_id === securityId) || securities[0];
   const activeStrat = strategies.find((s) => s.strategy_id === strategyId) || strategies[0];
+  React.useEffect(() => {
+    if (!strategyId && strategies.length) setStrategyId(strategies[0].strategy_id);
+    if (!securityId && securities.length) setSecurityId(securities[0].security_id);
+  }, [strategyId, securityId, strategies, securities]);
 
   // Backtest Mutation
   const runBacktest = useMutation({
     mutationFn: async () => {
       setErrorMessage(null);
-      const symbol = activeSec ? activeSec.symbol : 'RELIANCE';
+      if (!activeSec || !activeStrat || !startDate || !endDate) throw new Error('Choose a strategy, security, start date, and end date.');
+      const symbol = activeSec.symbol;
       const payload = {
         strategy_id: Number(strategyId),
         security_id: Number(securityId),
@@ -105,33 +110,9 @@ export function BacktestingPage() {
     },
   });
 
-  // Summary resolution (either mutation result or default from report)
-  const summary: BacktestSummary = (result?.summary ||
-    (result as unknown as BacktestSummary) ||
-    initialReport?.backtest || {
-      strategy_name: activeStrat?.strategy_name || 'Dual Moving Average Crossover',
-      symbol: activeSec?.symbol || 'RELIANCE',
-      total_return_pct: 18.42,
-      sharpe_ratio: 1.84,
-      max_drawdown_pct: 6.85,
-      win_rate_pct: 62.5,
-      total_trades: 48,
-      initial_capital: 100000,
-      final_capital: 118420,
-      profit_factor: 2.14,
-    }) as BacktestSummary;
-
-  // Chart data generation
-  const equityPoints = result?.equity_curve || Array.from({ length: 45 }, (_, i) => {
-    const day = i + 1;
-    const strat = 100000 * (1 + (i * 0.004) + Math.sin(i * 0.35) * 0.02);
-    const bench = 100000 * (1 + (i * 0.0018) + Math.cos(i * 0.25) * 0.01);
-    return {
-      date: `Day ${day}`,
-      equity: Number(strat.toFixed(2)),
-      benchmark: Number(bench.toFixed(2)),
-    };
-  });
+  const summary: BacktestSummary = result?.summary ?? initialReport?.backtest ?? {};
+  const equityPoints = result?.equity_curve || [];
+  const backtestTrades = result?.trades || [];
 
   return (
     <div className="space-y-6">
@@ -148,8 +129,8 @@ export function BacktestingPage() {
           </p>
         </div>
 
-        <span className="api-chip">
-          <span className="status-dot" /> ENGINE READY
+          <span className="api-chip">
+          <span className="status-dot" /> {activeStrat && activeSec ? 'ENGINE READY' : 'WAITING FOR DATA'}
         </span>
       </div>
 
@@ -166,6 +147,7 @@ export function BacktestingPage() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
+            if (!activeSec || !activeStrat || !startDate || !endDate) return;
             runBacktest.mutate();
           }}
           className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3 items-end"
@@ -241,7 +223,7 @@ export function BacktestingPage() {
           <div>
             <button
               type="submit"
-              disabled={runBacktest.isPending}
+              disabled={!activeSec || !activeStrat || !startDate || !endDate || runBacktest.isPending}
               className="w-full h-8 bg-[#1b3a2d] hover:bg-[#234c3b] disabled:opacity-50 text-[#86d9b2] border border-[#2b5945] rounded text-xs font-medium transition flex items-center justify-center gap-1.5"
             >
               <Play size={11} fill="currentColor" />
@@ -253,7 +235,7 @@ export function BacktestingPage() {
         {errorMessage && (
           <div className="mt-3 p-2.5 bg-[#261817] border border-[#482826] rounded text-xs text-[#e58d83] flex items-center gap-2">
             <AlertCircle size={14} />
-            <span>Simulation notice: {errorMessage} (Displaying validated statistical benchmark)</span>
+            <span>Backtest failed: {errorMessage}</span>
           </div>
         )}
       </div>
@@ -268,11 +250,11 @@ export function BacktestingPage() {
             </span>
           </div>
           <div className="metric-value font-mono text-[#69d5ad]">
-            +{(Number(summary.total_return_pct) || 18.42).toFixed(2)}%
+            {summary.total_return_pct == null ? '—' : `${Number(summary.total_return_pct) >= 0 ? '+' : ''}${Number(summary.total_return_pct).toFixed(2)}%`}
           </div>
           <div className="metric-foot">
-            <span className="change positive">+$18,420 Net</span>
-            <span>Alpha: +11.2%</span>
+            <span className="change positive">{summary.total_return_pct == null || summary.initial_capital == null ? '—' : `$${(Number(summary.initial_capital) * Number(summary.total_return_pct) / 100).toLocaleString()}`}</span>
+            <span>return from starting capital</span>
           </div>
         </article>
 
@@ -284,11 +266,11 @@ export function BacktestingPage() {
             </span>
           </div>
           <div className="metric-value font-mono">
-            {(Number(summary.sharpe_ratio) || 1.84).toFixed(2)}
+            {summary.sharpe_ratio == null ? '—' : Number(summary.sharpe_ratio).toFixed(2)}
           </div>
           <div className="metric-foot">
-            <span className="change positive">Sortino: 2.31</span>
-            <span>rf = 4.5%</span>
+            <span className="change positive">Risk-adjusted return</span>
+            <span>QuantDB metrics</span>
           </div>
         </article>
 
@@ -300,11 +282,11 @@ export function BacktestingPage() {
             </span>
           </div>
           <div className="metric-value font-mono text-[#ea837c]">
-            −{(Math.abs(Number(summary.max_drawdown_pct)) || 6.85).toFixed(2)}%
+            {summary.max_drawdown_pct == null ? '—' : `${Number(summary.max_drawdown_pct).toFixed(2)}%`}
           </div>
           <div className="metric-foot">
             <span className="change negative">Peak to Trough</span>
-            <span>14 days rec.</span>
+            <span>maximum peak-to-trough decline</span>
           </div>
         </article>
 
@@ -316,11 +298,11 @@ export function BacktestingPage() {
             </span>
           </div>
           <div className="metric-value font-mono">
-            {(Number(summary.win_rate_pct) || 62.5).toFixed(1)}%
+            {summary.win_rate_pct == null ? '—' : `${Number(summary.win_rate_pct).toFixed(1)}%`}
           </div>
           <div className="metric-foot">
-            <span className="change positive">PF: 2.14</span>
-            <span>{summary.total_trades || 48} Trades</span>
+            <span className="change positive">PF: {summary.profit_factor == null ? '—' : Number(summary.profit_factor).toFixed(2)}</span>
+            <span>{summary.total_trades ?? '—'} Trades</span>
           </div>
         </article>
       </div>
@@ -343,6 +325,7 @@ export function BacktestingPage() {
         </div>
 
         <div className="h-72 mt-4">
+          {equityPoints.length === 0 && <div className="empty-panel-state">Run a backtest to render its portfolio curve and benchmark comparison.</div>}
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={equityPoints} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
               <defs>
@@ -413,11 +396,11 @@ export function BacktestingPage() {
             </div>
             <div className="py-2.5 flex justify-between">
               <span className="text-[#78888e]">Starting Capital</span>
-              <span className="text-[#d8e2df]">${Number(summary.initial_capital || initialCapital).toLocaleString()}</span>
+              <span className="text-[#d8e2df]">{summary.initial_capital == null ? '—' : `$${Number(summary.initial_capital).toLocaleString()}`}</span>
             </div>
             <div className="py-2.5 flex justify-between">
               <span className="text-[#78888e]">Ending Capital</span>
-              <span className="text-[#69d5ad] font-semibold">${Number(summary.final_capital || 118420).toLocaleString()}</span>
+              <span className="text-[#69d5ad] font-semibold">{summary.final_capital == null ? '—' : `$${Number(summary.final_capital).toLocaleString()}`}</span>
             </div>
             <div className="py-2.5 flex justify-between">
               <span className="text-[#78888e]">Slippage / Fee Model</span>
@@ -432,23 +415,23 @@ export function BacktestingPage() {
           <div className="divide-y divide-[#1b252b] text-xs font-mono">
             <div className="py-2.5 flex justify-between">
               <span className="text-[#78888e]">Annualized Sharpe</span>
-              <span className="text-[#69d5ad]">{(Number(summary.sharpe_ratio) || 1.84).toFixed(2)}</span>
+              <span className="text-[#69d5ad]">{summary.sharpe_ratio == null ? '—' : Number(summary.sharpe_ratio).toFixed(2)}</span>
             </div>
             <div className="py-2.5 flex justify-between">
               <span className="text-[#78888e]">Profit Factor</span>
-              <span className="text-[#d8e2df]">{(Number(summary.profit_factor) || 2.14).toFixed(2)}</span>
+              <span className="text-[#d8e2df]">{summary.profit_factor == null ? '—' : Number(summary.profit_factor).toFixed(2)}</span>
             </div>
             <div className="py-2.5 flex justify-between">
               <span className="text-[#78888e]">Maximum Drawdown</span>
-              <span className="text-[#ea837c]">−{(Math.abs(Number(summary.max_drawdown_pct)) || 6.85).toFixed(2)}%</span>
+              <span className="text-[#ea837c]">{summary.max_drawdown_pct == null ? '—' : `${Number(summary.max_drawdown_pct).toFixed(2)}%`}</span>
             </div>
             <div className="py-2.5 flex justify-between">
               <span className="text-[#78888e]">Win / Loss Ratio</span>
-              <span className="text-[#d8e2df]">1.68</span>
+              <span className="text-[#d8e2df]">—</span>
             </div>
             <div className="py-2.5 flex justify-between">
               <span className="text-[#78888e]">Execution Engine</span>
-              <span className="text-[#84d9b3]">QuantDB Event-Driven</span>
+              <span className="text-[#84d9b3]">QuantDB simulation service</span>
             </div>
           </div>
         </div>
@@ -462,7 +445,7 @@ export function BacktestingPage() {
             <h2>Simulated Strategy Fills & Trade Journal</h2>
           </div>
           <span className="api-chip">
-            <Clock size={11} /> 7 RECENT SIMULATED FILLS
+            <Clock size={11} /> {backtestTrades.length} BACKTEST FILLS
           </span>
         </div>
 
@@ -480,35 +463,19 @@ export function BacktestingPage() {
               </tr>
             </thead>
             <tbody>
-              {[
-                { date: '2026-03-28 14:32:10', symbol: 'RELIANCE', side: 'BUY', price: 2984.50, qty: 15, pnl: '+₹420.50', status: 'FILLED' },
-                { date: '2026-03-24 10:15:40', symbol: 'RELIANCE', side: 'SELL', price: 2956.40, qty: 15, pnl: '+₹312.00', status: 'FILLED' },
-                { date: '2026-03-19 11:45:00', symbol: 'TCS', side: 'BUY', price: 3875.00, qty: 20, pnl: '+₹580.00', status: 'FILLED' },
-                { date: '2026-03-14 15:10:22', symbol: 'TCS', side: 'SELL', price: 3846.00, qty: 20, pnl: '-₹140.00', status: 'STOP_LOSS' },
-                { date: '2026-03-08 09:35:12', symbol: 'HDFCBANK', side: 'BUY', price: 1742.30, qty: 35, pnl: '+₹890.40', status: 'FILLED' },
-                { date: '2026-03-02 13:20:05', symbol: 'INFY', side: 'BUY', price: 1624.80, qty: 40, pnl: '+₹654.20', status: 'FILLED' },
-                { date: '2026-02-22 14:05:50', symbol: 'ICICIBANK', side: 'BUY', price: 1184.20, qty: 50, pnl: '+₹720.00', status: 'FILLED' },
-              ].map((trade, i) => (
-                <tr key={i}>
+              {backtestTrades.length === 0 && <tr><td colSpan={7} className="py-8 text-center text-[#7d8f96]">Run a backtest to see its simulated fills.</td></tr>}
+              {backtestTrades.map((trade, i) => {
+                const pnl = Number(trade.pnl ?? 0);
+                return <tr key={`${trade.date}-${i}`}>
                   <td className="font-mono text-xs text-[#7d8f96]">{trade.date}</td>
                   <td className="font-semibold text-xs text-[#dbe5e2]">{trade.symbol}</td>
-                  <td>
-                    <span className={`badge ${trade.side === 'BUY' ? 'badge-green' : 'badge-red'}`}>
-                      {trade.side}
-                    </span>
-                  </td>
-                  <td className="text-right font-mono text-xs">₹{trade.price.toFixed(2)}</td>
-                  <td className="text-right font-mono text-xs">{trade.qty}</td>
-                  <td className={`text-right font-mono text-xs font-semibold ${trade.pnl.startsWith('+') ? 'text-[#69d5ad]' : 'text-[#ea837c]'}`}>
-                    {trade.pnl}
-                  </td>
-                  <td>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#162229] text-[#7d8f96] border border-[#24353f]">
-                      {trade.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+                  <td><span className={`badge ${trade.side === 'BUY' ? 'badge-green' : 'badge-red'}`}>{trade.side}</span></td>
+                  <td className="text-right font-mono text-xs">${Number(trade.price).toFixed(2)}</td>
+                  <td className="text-right font-mono text-xs">{trade.shares}</td>
+                  <td className={`text-right font-mono text-xs font-semibold ${pnl >= 0 ? 'text-[#69d5ad]' : 'text-[#ea837c]'}`}>{trade.pnl == null ? '—' : `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`}</td>
+                  <td><span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#162229] text-[#7d8f96] border border-[#24353f]">SIMULATED</span></td>
+                </tr>;
+              })}
             </tbody>
           </table>
         </div>

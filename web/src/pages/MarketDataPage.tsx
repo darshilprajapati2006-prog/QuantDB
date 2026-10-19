@@ -93,7 +93,7 @@ export function MarketDataPage() {
             )}
           </h1>
           <p>
-            High-resolution OHLCV price series, spread dynamics & quote archives from Aiven MySQL.
+            OHLCV price series, spread dynamics and quote archives from the selected data provider.
           </p>
         </div>
 
@@ -216,7 +216,7 @@ export function MarketDataPage() {
         <div className="h-64 sm:h-80 w-full mt-4">
           {mktLoading ? (
             <div className="h-full flex items-center justify-center text-xs text-[#718087] font-mono">
-              Fetching time-series bars from Aiven MySQL...
+              Fetching time-series bars from QuantDB API...
             </div>
           ) : chartData.length === 0 ? (
             <div className="h-full flex items-center justify-center text-xs text-[#718087] font-mono">

@@ -41,7 +41,7 @@ export function HealthPage() {
   });
 
   const isReal = (health.data_mode || '').toUpperCase() === 'REAL';
-  const dbConnected = health.connected !== false;
+  const dbConnected = health.connected === true;
 
   return (
     <div className="space-y-7">
@@ -82,7 +82,7 @@ export function HealthPage() {
           </div>
           <p className="text-sm text-[#8fa2a8] mt-2 leading-relaxed">
             {isReal
-              ? 'Serving live tick archives, portfolios, and historical OHLCV records directly from Aiven Cloud MySQL 8.0.'
+              ? 'Serving database-backed portfolios and historical OHLCV records through QuantDB API.'
               : 'Serving offline synthetic mock datasets for testing and demonstration.'}
           </p>
         </div>
@@ -98,7 +98,7 @@ export function HealthPage() {
             }`}
           >
             <Database size={15} />
-            <span>REAL (Aiven DB)</span>
+            <span>REAL (Database)</span>
             {isReal && <Check size={14} className="text-[#8ce2be]" />}
           </button>
           <button
@@ -150,19 +150,19 @@ export function HealthPage() {
                 <Database size={22} />
               </div>
               <div>
-                <h3 className="text-base font-bold text-[#e8f1ed]">Aiven Cloud MySQL</h3>
-                <div className="text-xs text-[#7b8e95] font-mono mt-0.5">Port 14328 · TLSv1.3</div>
+                <h3 className="text-base font-bold text-[#e8f1ed]">QuantDB Database</h3>
+                <div className="text-xs text-[#7b8e95] font-mono mt-0.5">Configured on API host</div>
               </div>
             </div>
 
             <p className="text-xs text-[#8c9fa4] leading-relaxed mt-3">
-              {health.database_status || 'QuantDB active connection pool on Aiven Cloud.'}
+              {health.database_status || 'Database status has not been reported by the API.'}
             </p>
           </div>
 
           <div className="border-t border-[#1f2d36] pt-4 mt-5 text-xs font-mono text-[#768990] flex justify-between items-center">
             <span>Latency</span>
-            <span className="text-[#72d6ad] font-semibold">~34 ms</span>
+            <span className="text-[#72d6ad] font-semibold">{health.database_latency_ms == null ? '—' : `${Number(health.database_latency_ms)} ms`}</span>
           </div>
         </div>
 
@@ -241,15 +241,15 @@ export function HealthPage() {
         <h2 className="text-lg font-bold text-[#e8f1ed] mb-4">Environment Parameters</h2>
         <div className="divide-y divide-[#1f2d36] text-xs font-mono">
           <div className="py-3 flex justify-between items-center">
-            <span className="text-[#7c8e95]">Aiven Database Host</span>
-            <span className="text-[#d8e5e0] font-medium">quantdb-mysql-darshilprajapati2006-a582.d.aivencloud.com</span>
+            <span className="text-[#7c8e95]">Database Host</span>
+            <span className="text-[#d8e5e0] font-medium">Configured on API server</span>
           </div>
           <div className="py-3 flex justify-between items-center">
-            <span className="text-[#7c8e95]">Aiven Database Port</span>
-            <span className="text-[#d8e5e0] font-medium">14328</span>
+            <span className="text-[#7c8e95]">Database Port</span>
+            <span className="text-[#d8e5e0] font-medium">Configured on API server</span>
           </div>
           <div className="py-3 flex justify-between items-center">
-            <span className="text-[#7c8e95]">Aiven Database Name</span>
+            <span className="text-[#7c8e95]">Database Name</span>
             <span className="text-[#d8e5e0] font-medium font-bold">QuantDB</span>
           </div>
           <div className="py-3 flex justify-between items-center">

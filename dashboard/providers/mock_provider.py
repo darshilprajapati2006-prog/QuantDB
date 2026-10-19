@@ -97,7 +97,7 @@ class MockProvider:
     def get_portfolio_equity_curve(self, portfolio_id: int, days: int = 180) -> pd.DataFrame:
         return get_historical_equity_curve(portfolio_id, days)
 
-    def get_orders(self, portfolio_id: Optional[int] = None, status: Optional[str] = None) -> pd.DataFrame:
+    def get_orders(self, portfolio_id: Optional[int] = None, status: Optional[str] = None, user_id: Optional[int] = None) -> pd.DataFrame:
         return mock_get_orders(portfolio_id, status)
 
     def submit_order(
@@ -108,7 +108,8 @@ class MockProvider:
         side: str,
         order_type: str,
         quantity: int,
-        price: float
+        price: float,
+        user_id: Optional[int] = None,
     ) -> Dict:
         order = mock_submit_order(portfolio_id, security_id, symbol, side, order_type, quantity, price)
         if order["status"] == "FILLED":

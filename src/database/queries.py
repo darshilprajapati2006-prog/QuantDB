@@ -147,7 +147,7 @@ INSERT INTO users (
     status,
     is_verified,
     created_at
-) VALUES (%s, %s, %s, %s, %s, %s, 1, %s)
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 ON DUPLICATE KEY UPDATE
     name = VALUES(name),
     status = 'ACTIVE',
@@ -396,6 +396,7 @@ GET_ORDERS_BY_USER = """
 SELECT
     o.order_id,
     o.user_id,
+    o.portfolio_id,
     o.security_id,
     s.symbol,
     o.order_type,
@@ -415,6 +416,7 @@ GET_ORDERS_BY_SECURITY = """
 SELECT
     o.order_id,
     o.user_id,
+    o.portfolio_id,
     o.security_id,
     s.symbol,
     o.order_type,
@@ -434,6 +436,7 @@ GET_ALL_ORDERS = """
 SELECT
     o.order_id,
     o.user_id,
+    o.portfolio_id,
     o.security_id,
     s.symbol,
     o.order_type,
@@ -506,6 +509,7 @@ GET_TRADES_BY_SECURITY = """
 SELECT
     t.trade_id,
     t.order_id,
+    o.portfolio_id,
     t.security_id,
     s.symbol,
     t.trade_side,
@@ -534,6 +538,26 @@ SELECT
 FROM trades t
 JOIN securities s
     ON t.security_id = s.security_id
+ORDER BY t.trade_time DESC;
+"""
+
+GET_TRADES_BY_USER = """
+SELECT
+    t.trade_id,
+    t.order_id,
+    o.portfolio_id,
+    t.security_id,
+    s.symbol,
+    t.trade_side,
+    t.quantity,
+    t.execution_price,
+    t.trade_time,
+    t.transaction_cost,
+    o.user_id
+FROM trades t
+JOIN orders o ON o.order_id = t.order_id
+JOIN securities s ON s.security_id = t.security_id
+WHERE o.user_id = %s
 ORDER BY t.trade_time DESC;
 """
 
@@ -1211,7 +1235,7 @@ def create_user(
         uname = kwargs.get("username") or (resolved_email.split("@")[0] if "@" in resolved_email else resolved_name)
         cursor.execute(
             CREATE_USER,
-            (uname, resolved_name, resolved_email, resolved_hash, resolved_role, resolved_status, now),
+            (uname, resolved_name, resolved_email, resolved_hash, resolved_role, resolved_status, bool(kwargs.get("is_verified", False)), now),
         )
         conn.commit()
         return cursor.lastrowid
@@ -1413,6 +1437,15 @@ def get_all_trades(conn) -> List[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(GET_ALL_TRADES)
+        return cursor.fetchall()
+    finally:
+        _close_cursor(cursor)
+
+
+def get_trades_by_user(conn, user_id: int) -> List[Dict[str, Any]]:
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(GET_TRADES_BY_USER, (user_id,))
         return cursor.fetchall()
     finally:
         _close_cursor(cursor)

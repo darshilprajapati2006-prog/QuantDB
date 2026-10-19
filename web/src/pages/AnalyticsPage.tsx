@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Gauge,
@@ -25,41 +25,27 @@ import {
   Cell,
 } from 'recharts';
 import { request } from '../lib/api';
-import type { RiskMetrics } from '../types';
+import type { Portfolio, RiskMetrics } from '../types';
 
 export function AnalyticsPage() {
-  const [portfolioId, setPortfolioId] = useState<number>(1);
-
+  const [portfolioId, setPortfolioId] = useState<number>(0);
+  const { data: portfolios = [] } = useQuery({ queryKey: ['portfolios'], queryFn: () => request<Portfolio[]>('/portfolios') });
+  useEffect(() => {
+    if (portfolios.length && !portfolios.some((item) => item.portfolio_id === portfolioId)) setPortfolioId(portfolios[0].portfolio_id);
+  }, [portfolios, portfolioId]);
   const { data: risk = {} as RiskMetrics, isLoading, refetch } = useQuery({
     queryKey: ['risk', portfolioId],
     queryFn: () => request<RiskMetrics>(`/analytics/risk?portfolio_id=${portfolioId}`),
+    enabled: portfolioId > 0,
   });
-
-  const sharpe = Number(risk.sharpe_ratio ?? 1.84);
-  const sortino = Number(risk.sortino_ratio ?? 2.31);
-  const maxDd = Math.abs(Number(risk.max_drawdown ?? 6.85));
-  const vol = Number(risk.annualized_volatility ?? 14.2);
-  const beta = Number(risk.beta_vs_sp500 ?? 0.88);
-  const var95 = Number(risk.var_95_daily ?? -1.45);
-  const cvar95 = Number(risk.cvar_95_daily ?? -2.18);
-
-  // Return distribution mockup centered around positive mean
-  const returnDistribution = [
-    { bucket: '< -3%', count: 2, isVar: true },
-    { bucket: '-3% to -2%', count: 6, isVar: true },
-    { bucket: '-2% to -1%', count: 18, isVar: false },
-    { bucket: '-1% to 0%', count: 42, isVar: false },
-    { bucket: '0% to +1%', count: 65, isVar: false },
-    { bucket: '+1% to +2%', count: 48, isVar: false },
-    { bucket: '+2% to +3%', count: 21, isVar: false },
-    { bucket: '> +3%', count: 7, isVar: false },
-  ];
-
-  // Drawdown underwater curve
-  const underwaterData = Array.from({ length: 30 }, (_, i) => ({
-    day: `D${i + 1}`,
-    drawdown: -(Math.abs(Math.sin(i * 0.45) * 5.2 + Math.cos(i * 0.2) * 2.1)),
-  }));
+  const sortino = (risk as RiskMetrics & { sortino_ratio?: number }).sortino_ratio;
+  const maxDd = risk.max_drawdown;
+  const vol = risk.annualized_volatility;
+  const beta = risk.beta_vs_sp500;
+  const var95 = risk.var_95_daily;
+  const cvar95 = risk.cvar_95_daily;
+  const returnDistribution: Array<{ bucket: string; count: number; isVar: boolean }> = [];
+  const underwaterData: Array<{ day: string; drawdown: number }> = [];
 
   const stressTests = [
     { scenario: '2008 Global Financial Crisis', impact: -21.4, severity: 'HIGH' },
@@ -84,10 +70,16 @@ export function AnalyticsPage() {
           </p>
         </div>
 
-        <button onClick={() => refetch()} className="outline-button" title="Recalculate metrics">
-          <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
-          <span>Recalculate Risk</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <select aria-label="Portfolio for risk metrics" value={portfolioId} onChange={(event) => setPortfolioId(Number(event.target.value))} className="outline-button">
+            {portfolios.length === 0 && <option value={0}>No portfolio</option>}
+            {portfolios.map((portfolio) => <option key={portfolio.portfolio_id} value={portfolio.portfolio_id}>{portfolio.portfolio_name}</option>)}
+          </select>
+          <button onClick={() => refetch()} disabled={!portfolioId} className="outline-button" title="Recalculate metrics">
+            <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
+            <span>Recalculate Risk</span>
+          </button>
+        </div>
       </div>
 
       {/* Primary KPI Strip */}
@@ -100,10 +92,10 @@ export function AnalyticsPage() {
             </span>
           </div>
           <div className="metric-value font-mono text-[#69d5ad]">
-            {sharpe.toFixed(2)}
+            {risk.sharpe_ratio == null ? '—' : Number(risk.sharpe_ratio).toFixed(2)}
           </div>
           <div className="metric-foot">
-            <span className="change positive">EXCELLENT</span>
+            <span className="change">{risk.sharpe_ratio == null ? 'Awaiting data' : Number(risk.sharpe_ratio) >= 1 ? 'Positive' : 'Below 1.0'}</span>
             <span>Excess return / risk</span>
           </div>
         </article>
@@ -116,7 +108,7 @@ export function AnalyticsPage() {
             </span>
           </div>
           <div className="metric-value font-mono">
-            {sortino.toFixed(2)}
+            {sortino == null ? '—' : Number(sortino).toFixed(2)}
           </div>
           <div className="metric-foot">
             <span className="change positive">Downside risk only</span>
@@ -131,7 +123,7 @@ export function AnalyticsPage() {
             </span>
           </div>
           <div className="metric-value font-mono text-[#ea837c]">
-            −{maxDd.toFixed(2)}%
+            {maxDd == null ? '—' : `${Number(maxDd).toFixed(2)}%`}
           </div>
           <div className="metric-foot">
             <span className="change negative">Peak-to-Trough</span>
@@ -146,10 +138,10 @@ export function AnalyticsPage() {
             </span>
           </div>
           <div className="metric-value font-mono text-[#e6b88a]">
-            {var95.toFixed(2)}%
+            {var95 == null ? '—' : `${Number(var95).toFixed(2)}%`}
           </div>
           <div className="metric-foot">
-            <span>CVaR: {cvar95.toFixed(2)}%</span>
+            <span>CVaR: {cvar95 == null ? '—' : `${Number(cvar95).toFixed(2)}%`}</span>
           </div>
         </article>
       </div>
@@ -160,8 +152,8 @@ export function AnalyticsPage() {
         <div className="panel">
           <div className="panel-head">
             <div>
-              <div className="panel-kicker">PARAMETRIC VALUE-AT-RISK</div>
-              <h2>Historical Return Frequency & 95% Cutoff</h2>
+              <div className="panel-kicker">HISTORICAL RISK DATA</div>
+              <h2>Return Frequency & 95% Cutoff</h2>
             </div>
             <div className="flex items-center gap-2 text-[10px] font-mono">
               <span className="flex items-center gap-1 text-[#ea837c]">
@@ -173,7 +165,8 @@ export function AnalyticsPage() {
             </div>
           </div>
 
-          <div className="h-60 mt-3">
+          <div className="h-60 mt-3 relative">
+            {returnDistribution.length === 0 && <div className="chart-empty">Historical return series are not available for this account yet.</div>}
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={returnDistribution} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke="#1c262c" vertical={false} />
@@ -199,7 +192,7 @@ export function AnalyticsPage() {
           </div>
           <div className="text-[11px] text-[#78888e] flex items-center justify-between border-t border-[#1e272d] pt-2.5 mt-2">
             <span>Confidence Interval: <b>95.0%</b></span>
-            <span>Historical 1-Day VaR: <b className="text-[#ea837c] font-mono">{var95.toFixed(2)}%</b></span>
+            <span>Historical 1-Day VaR: <b className="text-[#ea837c] font-mono">{var95 == null ? '—' : `${Number(var95).toFixed(2)}%`}</b></span>
           </div>
         </div>
 
@@ -210,10 +203,11 @@ export function AnalyticsPage() {
               <div className="panel-kicker">HISTORICAL DRAWDOWN</div>
               <h2>Underwater Equity Curve</h2>
             </div>
-            <span className="text-[10px] font-mono text-[#ea837c]">MAX: -{maxDd.toFixed(2)}%</span>
+            <span className="text-[10px] font-mono text-[#ea837c]">MAX: {maxDd == null ? '—' : `${Number(maxDd).toFixed(2)}%`}</span>
           </div>
 
-          <div className="h-60 mt-3">
+          <div className="h-60 mt-3 relative">
+            {underwaterData.length === 0 && <div className="chart-empty">Drawdown history will appear after QuantDB has valuation observations.</div>}
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={underwaterData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <defs>
@@ -247,8 +241,8 @@ export function AnalyticsPage() {
             </ResponsiveContainer>
           </div>
           <div className="text-[11px] text-[#78888e] flex items-center justify-between border-t border-[#1e272d] pt-2.5 mt-2">
-            <span>Recovery Velocity: <b>Normal</b></span>
-            <span>Current Drawdown: <b className="text-[#64caa1] font-mono">0.0% (At High)</b></span>
+            <span>Recovery Velocity: <b>—</b></span>
+            <span>Current Drawdown: <b className="text-[#64caa1] font-mono">—</b></span>
           </div>
         </div>
       </div>
@@ -257,8 +251,8 @@ export function AnalyticsPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Stress Testing */}
         <div className="panel">
-          <div className="panel-kicker">SCENARIO ANALYSIS</div>
-          <h2 className="text-sm font-semibold text-[#e1e9e6] mb-3">Macroeconomic Stress Testing</h2>
+          <div className="panel-kicker">ILLUSTRATIVE SCENARIO ASSUMPTIONS</div>
+          <h2 className="text-sm font-semibold text-[#e1e9e6] mb-3">Example Market Shock Scenarios</h2>
           <div className="divide-y divide-[#1e272d] text-xs font-mono">
             {stressTests.map((st) => (
               <div key={st.scenario} className="py-2.5 flex items-center justify-between">
@@ -281,30 +275,30 @@ export function AnalyticsPage() {
           <div className="divide-y divide-[#1e272d] text-xs font-mono">
             <div className="py-2.5 flex justify-between">
               <span className="text-[#76868c]">Annualized Volatility (σ)</span>
-              <span className="text-[#d8e2df] font-medium">{vol.toFixed(1)}%</span>
+              <span className="text-[#d8e2df] font-medium">{vol == null ? '—' : `${Number(vol).toFixed(1)}%`}</span>
             </div>
             <div className="py-2.5 flex justify-between">
               <span className="text-[#76868c]">Beta vs S&P 500 (β)</span>
-              <span className="text-[#d8e2df] font-medium">{beta.toFixed(2)}</span>
+              <span className="text-[#d8e2df] font-medium">{beta == null ? '—' : Number(beta).toFixed(2)}</span>
             </div>
             <div className="py-2.5 flex justify-between">
               <span className="text-[#76868c]">Daily Expected Shortfall (CVaR 95%)</span>
-              <span className="text-[#ea837c] font-medium">{cvar95.toFixed(2)}%</span>
+              <span className="text-[#ea837c] font-medium">{cvar95 == null ? '—' : `${Number(cvar95).toFixed(2)}%`}</span>
             </div>
             <div className="py-2.5 flex justify-between">
               <span className="text-[#76868c]">Kurtosis / Fat-Tail Risk</span>
-              <span className="text-[#d8e2df] font-medium">3.42 (Leptokurtic)</span>
+              <span className="text-[#d8e2df] font-medium">Not calculated</span>
             </div>
             <div className="py-2.5 flex justify-between">
               <span className="text-[#76868c]">Risk Classification</span>
-              <span className="text-[#64caa1] font-semibold">BALANCED AGGRESSIVE</span>
+              <span className="text-[#64caa1] font-semibold">Awaiting data</span>
             </div>
           </div>
         </div>
       </div>
 
       <div className="disclaimer">
-        <ShieldCheck size={14} /> Risk analytics calculated using QuantDB quantitative libraries with daily log returns.
+        <ShieldCheck size={14} /> Portfolio risk metrics come from the selected account. Example market shock scenarios are illustrative and are not portfolio forecasts.
       </div>
     </div>
   );

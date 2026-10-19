@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -36,7 +36,7 @@ const ALLOCATION_COLORS = ['#69d5ad', '#5da5da', '#faa43a', '#b276b2', '#f15854'
 
 export function PortfolioPage() {
   const navigate = useNavigate();
-  const [selectedPortfolioId, setSelectedPortfolioId] = useState<number>(1);
+  const [selectedPortfolioId, setSelectedPortfolioId] = useState<number>(0);
   const [timeframe, setTimeframe] = useState<'1M' | '3M' | '6M' | '1Y' | 'ALL'>('1M');
 
   // Fetch list of portfolios
@@ -44,6 +44,10 @@ export function PortfolioPage() {
     queryKey: ['portfolios'],
     queryFn: () => request<Portfolio[]>('/portfolios'),
   });
+
+  useEffect(() => {
+    if (portfolios.length && !portfolios.some((item) => item.portfolio_id === selectedPortfolioId)) setSelectedPortfolioId(portfolios[0].portfolio_id);
+  }, [portfolios, selectedPortfolioId]);
 
   // Fetch detailed portfolio info
   const { data: portDetail, isLoading: detailLoading, refetch: refetchDetail } = useQuery({
@@ -54,41 +58,26 @@ export function PortfolioPage() {
 
   const activePort = portDetail?.summary || portfolios.find((p) => p.portfolio_id === selectedPortfolioId) || portfolios[0];
   const rawPositions = portDetail?.positions || [];
-  const DEFAULT_POSITIONS: Position[] = [
-    { portfolio_id: 1, security_id: 1, symbol: 'RELIANCE', security_name: 'Reliance Industries Ltd.', quantity: 120, average_price: 2420.50, current_price: 2548.80, market_value: 305856.00, unrealized_pnl: 15396.00 },
-    { portfolio_id: 1, security_id: 2, symbol: 'TCS', security_name: 'Tata Consultancy Services', quantity: 65, average_price: 3410.00, current_price: 3620.25, market_value: 235316.25, unrealized_pnl: 13666.25 },
-    { portfolio_id: 1, security_id: 3, symbol: 'HDFCBANK', security_name: 'HDFC Bank Ltd.', quantity: 110, average_price: 1580.40, current_price: 1695.10, market_value: 186461.00, unrealized_pnl: 12617.00 },
-    { portfolio_id: 1, security_id: 4, symbol: 'INFY', security_name: 'Infosys Ltd.', quantity: 85, average_price: 1450.20, current_price: 1532.50, market_value: 130262.50, unrealized_pnl: 6995.50 },
-    { portfolio_id: 1, security_id: 5, symbol: 'ICICIBANK', security_name: 'ICICI Bank Ltd.', quantity: 130, average_price: 990.00, current_price: 1045.30, market_value: 135889.00, unrealized_pnl: 7189.00 },
-  ];
-  const positions = rawPositions.length > 0 ? rawPositions : DEFAULT_POSITIONS;
+  const positions = rawPositions;
 
   // Format equity curve data
   const rawEquity = portDetail?.equity || [];
-  const chartData = rawEquity.length > 0
-    ? rawEquity.map((item, idx) => ({
-        label: ('date' in item ? item.date : (item as { timestamp?: string }).timestamp) || `Day ${idx + 1}`,
-        equity: Number(item.equity),
-      }))
-    : Array.from({ length: 30 }, (_, i) => ({
-        label: `Day ${i + 1}`,
-        equity: (activePort?.total_equity || 100000) * (1 + (i * 0.003) + Math.sin(i * 0.5) * 0.015),
-      }));
+  const chartData = rawEquity.map((item, idx) => ({
+    label: ('date' in item ? item.date : (item as { timestamp?: string }).timestamp) || `Day ${idx + 1}`,
+    equity: Number(item.equity),
+  }));
 
   // Calculate allocation breakdown
   const totalMarketValue = positions.reduce((acc, p) => acc + (Number(p.market_value) || (p.quantity * (p.current_price || p.average_price))), 0);
   const cashBalance = Number(activePort?.current_cash || 0);
-  const totalEquity = Number(activePort?.total_equity || totalMarketValue + cashBalance || 100000);
+  const totalEquity = Number(activePort?.total_equity ?? activePort?.portfolio_value ?? (activePort ? totalMarketValue + cashBalance : 0));
 
   const allocationData = [
     ...positions.slice(0, 5).map((p) => ({
       name: p.symbol,
       value: Number(p.market_value) || (p.quantity * (p.current_price || p.average_price)),
     })),
-    {
-      name: 'Cash',
-      value: cashBalance > 0 ? cashBalance : totalEquity * 0.15,
-    },
+    ...(activePort ? [{ name: 'Cash', value: cashBalance }] : []),
   ];
 
   const totalAlloc = allocationData.reduce((acc, i) => acc + i.value, 0);
@@ -167,10 +156,10 @@ export function PortfolioPage() {
             </span>
           </div>
           <div className="metric-value font-mono">
-            ${totalEquity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {activePort ? `$${totalEquity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
           </div>
           <div className="metric-foot">
-            <span className="change positive">↗ +{(activePort?.daily_return_pct || 1.84).toFixed(2)}%</span>
+            <span className="change positive">{activePort ? `${Number(activePort.daily_return_pct ?? 0) >= 0 ? '↗ +' : '↘ '}${Number(activePort.daily_return_pct ?? 0).toFixed(2)}%` : '—'}</span>
             <span>daily change</span>
           </div>
         </article>
@@ -183,10 +172,10 @@ export function PortfolioPage() {
             </span>
           </div>
           <div className="metric-value font-mono">
-            ${cashBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {activePort ? `$${cashBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
           </div>
           <div className="metric-foot">
-            <span>{totalEquity > 0 ? ((cashBalance / totalEquity) * 100).toFixed(1) : '0.0'}% of portfolio</span>
+            <span>{activePort && totalEquity > 0 ? `${((cashBalance / totalEquity) * 100).toFixed(1)}% of portfolio` : '—'}</span>
           </div>
         </article>
 
@@ -198,10 +187,10 @@ export function PortfolioPage() {
             </span>
           </div>
           <div className="metric-value font-mono text-[#74d2aa]">
-            +${(Number(activePort?.unrealized_pnl) || 4520.0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {activePort ? `$${Number(activePort.unrealized_pnl ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
           </div>
           <div className="metric-foot">
-            <span className="change positive">+4.28%</span>
+            <span className="change">{activePort ? `${positions.length} open positions` : '—'}</span>
             <span>open holdings</span>
           </div>
         </article>
@@ -214,10 +203,10 @@ export function PortfolioPage() {
             </span>
           </div>
           <div className="metric-value font-mono">
-            {(Number(activePort?.sharpe_ratio) || 1.82).toFixed(2)}
+            {activePort?.sharpe_ratio == null ? '—' : Number(activePort.sharpe_ratio).toFixed(2)}
           </div>
           <div className="metric-foot">
-            <span className="change positive">Institutional Grade</span>
+            <span className="change">Risk-adjusted performance</span>
           </div>
         </article>
       </div>
@@ -232,7 +221,7 @@ export function PortfolioPage() {
               <h2>Portfolio Performance Curve</h2>
             </div>
             <div className="chart-actions">
-              <span className="live-label"><i /> REAL-TIME</span>
+              <span className="live-label"><i /> {chartData.length ? 'DATABASE HISTORY' : 'WAITING FOR HISTORY'}</span>
               {(['1M', '3M', '6M', '1Y', 'ALL'] as const).map((t) => (
                 <button
                   key={t}
@@ -246,9 +235,9 @@ export function PortfolioPage() {
           </div>
 
           <div className="chart-summary">
-            <strong>${totalEquity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
-            <span className="change positive">↗ +$3,420.00 (3.25%)</span>
-            <span className="muted">vs baseline capital</span>
+            <strong>{activePort ? `$${totalEquity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</strong>
+            <span className="change">{activePort?.daily_return_pct == null ? '—' : `${Number(activePort.daily_return_pct) >= 0 ? '↗ +' : '↘ '}${Number(activePort.daily_return_pct).toFixed(2)}%`}</span>
+            <span className="muted">daily return</span>
           </div>
 
           <div className="h-68 mt-4">
@@ -402,12 +391,13 @@ export function PortfolioPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#1b2730]">
-                {positions.map((pos) => {
-                  const currentPrice = Number(pos.current_price || pos.average_price * 1.05);
+                {positions.length === 0 && <tr><td colSpan={7} className="py-10 text-center text-[#7b8e95]">No open positions for this portfolio yet.</td></tr>}
+            {positions.map((pos) => {
+              const currentPrice = pos.current_price == null ? null : Number(pos.current_price);
                   const avgPrice = Number(pos.average_price);
-                  const mktValue = Number(pos.market_value || pos.quantity * currentPrice);
-                  const pnl = Number(pos.unrealized_pnl || (currentPrice - avgPrice) * pos.quantity);
-                  const pnlPct = avgPrice > 0 ? ((currentPrice - avgPrice) / avgPrice) * 100 : 0;
+              const mktValue = pos.market_value == null && currentPrice != null ? pos.quantity * currentPrice : Number(pos.market_value || 0);
+              const pnl = pos.unrealized_pnl == null && currentPrice != null ? (currentPrice - avgPrice) * pos.quantity : Number(pos.unrealized_pnl || 0);
+              const pnlPct = avgPrice > 0 && currentPrice != null ? ((currentPrice - avgPrice) / avgPrice) * 100 : null;
                   const weight = totalEquity > 0 ? (mktValue / totalEquity) * 100 : 0;
                   const isPos = pnl >= 0;
 
@@ -429,7 +419,7 @@ export function PortfolioPage() {
                         ${avgPrice.toFixed(2)}
                       </td>
                       <td className="py-3.5 px-4 text-right text-[#e2ece8] font-bold">
-                        ${currentPrice.toFixed(2)}
+                        {currentPrice == null ? '—' : `$${currentPrice.toFixed(2)}`}
                       </td>
                       <td className="py-3.5 px-4 text-right text-[#e8f1ed] font-bold">
                         ${mktValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -439,7 +429,7 @@ export function PortfolioPage() {
                       </td>
                       <td className="py-3.5 px-4 text-right font-semibold">
                         <div className={isPos ? 'text-[#6cdbb0]' : 'text-[#ea837c]'}>
-                          {isPos ? '+' : ''}${pnl.toFixed(2)} ({isPos ? '+' : ''}{pnlPct.toFixed(2)}%)
+                          {pos.unrealized_pnl == null && currentPrice == null ? '—' : `${isPos ? '+' : ''}$${pnl.toFixed(2)}${pnlPct == null ? '' : ` (${isPos ? '+' : ''}${pnlPct.toFixed(2)}%)`}`}
                         </div>
                       </td>
                       <td className="py-3.5 px-4 text-center">
