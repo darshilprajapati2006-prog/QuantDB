@@ -126,7 +126,7 @@ class MockProvider:
             )
         return order
 
-    def get_trades(self, portfolio_id: Optional[int] = None) -> pd.DataFrame:
+    def get_trades(self, portfolio_id: Optional[int] = None, user_id: Optional[int] = None) -> pd.DataFrame:
         return mock_get_trades(portfolio_id)
 
     def get_strategies(self) -> List[Dict]:
