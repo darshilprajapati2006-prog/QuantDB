@@ -271,7 +271,7 @@ def validate_email_domain(email_str: str) -> Tuple[bool, str]:
             return True, ""
         except (socket.gaierror, socket.herror):
             return False, (
-                f"The email domain '@{domain}' could not be found. "
+                f"The email domain '@{domain}' does not exist or could not be found. "
                 "Please check the address or use another email."
             )
     except Exception as exc:

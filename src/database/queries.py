@@ -21,13 +21,11 @@ from .connection import DatabaseConnectionError
 GET_USER_BY_ID = """
 SELECT
     user_id,
-    username,
     name,
     email,
     password_hash,
     role,
     status,
-    is_verified,
     created_at
 FROM users
 WHERE user_id = %s;
@@ -36,13 +34,11 @@ WHERE user_id = %s;
 GET_USER_BY_EMAIL = """
 SELECT
     user_id,
-    username,
     name,
     email,
     password_hash,
     role,
     status,
-    is_verified,
     created_at
 FROM users
 WHERE email = %s;
@@ -51,44 +47,38 @@ WHERE email = %s;
 GET_USER_BY_USERNAME = """
 SELECT
     user_id,
-    username,
     name,
     email,
     password_hash,
     role,
     status,
-    is_verified,
     created_at
 FROM users
-WHERE username = %s OR email = %s;
+WHERE email = %s OR email LIKE CONCAT(%s, '@%%');
 """
 
 GET_USER_BY_IDENTIFIER = """
 SELECT
     user_id,
-    username,
     name,
     email,
     password_hash,
     role,
     status,
-    is_verified,
     created_at
 FROM users
-WHERE email = %s OR username = %s OR email LIKE CONCAT(%s, '@%%')
-ORDER BY (email = %s) DESC, (username = %s) DESC
+WHERE email = %s OR email LIKE CONCAT(%s, '@%%')
+ORDER BY (email = %s) DESC
 LIMIT 1;
 """
 
 GET_ALL_USERS = """
 SELECT
     user_id,
-    username,
     name,
     email,
     role,
     status,
-    is_verified,
     created_at
 FROM users
 ORDER BY user_id DESC;
@@ -139,19 +129,13 @@ WHERE user_id = %s;
 
 CREATE_USER = """
 INSERT INTO users (
-    username,
     name,
     email,
     password_hash,
     role,
     status,
-    is_verified,
     created_at
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-ON DUPLICATE KEY UPDATE
-    name = VALUES(name),
-    status = 'ACTIVE',
-    is_verified = 1;
+) VALUES (%s, %s, %s, %s, %s, %s);
 """
 
 # ============================================================
@@ -1083,13 +1067,21 @@ def get_user_by_email(conn, email: str) -> Optional[Dict[str, Any]]:
 def get_user_by_username(conn, username: str) -> Optional[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
-        cursor.execute(GET_USER_BY_USERNAME, (username, username))
+        alias_map = {
+            "admin01": "admin@quantdb.com",
+            "trader01": "trader@quantdb.com",
+            "developer01": "developer@quantdb.com",
+            "researcher01": "researcher@quantdb.com",
+            "user01": "user01@quantdb.local",
+        }
+        target = alias_map.get((username or "").strip().lower(), username)
+        cursor.execute(GET_USER_BY_USERNAME, (target, target))
         row = cursor.fetchone()
         if row:
             return _normalize_user_dict(row)
         cursor.execute(
             GET_USER_BY_IDENTIFIER,
-            (username, username, username, username, username)
+            (target, target, target)
         )
         return _normalize_user_dict(cursor.fetchone())
     finally:
@@ -1099,11 +1091,27 @@ def get_user_by_username(conn, username: str) -> Optional[Dict[str, Any]]:
 def get_user_by_identifier(conn, identifier: str) -> Optional[Dict[str, Any]]:
     cursor = conn.cursor(dictionary=True)
     try:
+        alias_map = {
+            "admin01": "admin@quantdb.com",
+            "trader01": "trader@quantdb.com",
+            "developer01": "developer@quantdb.com",
+            "researcher01": "researcher@quantdb.com",
+            "user01": "user01@quantdb.local",
+        }
+        clean_id = (identifier or "").strip().lower()
+        target = alias_map.get(clean_id, identifier)
         cursor.execute(
             GET_USER_BY_IDENTIFIER,
-            (identifier, identifier, identifier, identifier, identifier)
+            (target, target, target)
         )
-        return _normalize_user_dict(cursor.fetchone())
+        row = cursor.fetchone()
+        if not row and target != identifier:
+            cursor.execute(
+                GET_USER_BY_IDENTIFIER,
+                (identifier, identifier, identifier)
+            )
+            row = cursor.fetchone()
+        return _normalize_user_dict(row)
     finally:
         _close_cursor(cursor)
 
@@ -1234,7 +1242,7 @@ def create_user(
 
         cursor.execute(
             CREATE_USER,
-            (uname, resolved_name, resolved_email, resolved_hash, resolved_role, resolved_status, bool(kwargs.get("is_verified", False)), now),
+            (resolved_name, resolved_email, resolved_hash, resolved_role, resolved_status, now),
         )
         conn.commit()
         return cursor.lastrowid
