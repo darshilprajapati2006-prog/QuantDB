@@ -155,9 +155,19 @@ def render_sidebar(current_page: str = "Overview") -> str:
                 st.rerun()
 
         if st.button("↻ Refresh database data", use_container_width=True, key="btn_refresh_database_data"):
-            # Dashboard read services use Streamlit's shared data cache. Clearing
-            # it makes external SQL edits visible immediately on the next render.
-            st.cache_data.clear()
+            from dashboard.services.analytics_service import clear_analytics_service_cache
+            from dashboard.services.backtest_service import clear_backtest_service_cache
+            from dashboard.services.market_service import clear_market_service_cache
+            from dashboard.services.portfolio_service import clear_portfolio_service_cache
+            from dashboard.services.strategy_service import clear_strategy_service_cache
+            from dashboard.services.trading_service import invalidate_trading_cache
+
+            clear_analytics_service_cache()
+            clear_backtest_service_cache()
+            clear_market_service_cache()
+            clear_portfolio_service_cache()
+            clear_strategy_service_cache()
+            invalidate_trading_cache()
             st.rerun()
 
         # Bottom System Status Widget

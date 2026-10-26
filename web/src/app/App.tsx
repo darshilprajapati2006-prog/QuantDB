@@ -118,14 +118,16 @@ function App() {
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const auth = useAuth();
+  const { data = fallback, isError, isLoading } = useQuery({
+    queryKey: ['overview', auth.profile?.user_id],
+    queryFn: () => request<OverviewData>('/overview'),
+    enabled: Boolean(auth.profile),
+    retry: 1,
+  });
   if (auth.loading) return <LoadingScreen/>;
   if (!auth.user || auth.verificationRequired || auth.setupRequired) return <AuthScreen/>;
   if (!auth.profile) return <AuthSetupIssue/>;
   const profile = auth.profile;
-  const { data = fallback, isError, isLoading } = useQuery({
-    queryKey: ['overview'],
-    queryFn: () => request<OverviewData>('/overview'),
-  });
 
   const h = (data?.health || {}) as Health;
   const quotes = data?.market || [];

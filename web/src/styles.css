@@ -1559,7 +1559,7 @@ footer > span:last-child {
 @media (max-width: 500px) { .auth-page { padding: 12px; } .auth-panel-wrap { min-height: calc(100svh - 24px); } .auth-card { padding: 21px 18px; } .auth-card h2 { font-size: 24px; } .auth-tabs { gap: 18px; } }
 
 .admin-metrics { margin-bottom: 20px; }
-.auth-page:has(.verify-card),.auth-page:has(.auth-issue) { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; width: 100vw; height: 100svh; min-height: 100svh; padding: 24px; overflow: auto; }
+.auth-page:has(.verify-card),.auth-page:has(.auth-issue) { position: fixed; z-index: 50; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; width: 100vw; height: 100svh; min-height: 100svh; padding: 24px; overflow: auto; }
 .verify-card { width: min(100%, 520px); max-height: calc(100svh - 48px); margin: auto; overflow-y: auto; }
 .verify-card .verify-icon { margin-left: 0; }
 .verify-card .auth-message { max-width: 100%; }
@@ -1590,6 +1590,10 @@ footer > span:last-child {
 .role-request-form button { min-height: 34px; border: 1px solid #176071; border-radius: 7px; background: #0d3542; color: #65dcea; font-size: 10px; font-weight: 700; }
 .role-request-form button:disabled { opacity: .55; }
 .role-request-message { color: #eeb98b; font-size: 10px; overflow-wrap: anywhere; }
+.role-request-retry { padding: 0; border: 0; background: transparent; color: #78d8de; font: inherit; text-decoration: underline; }
+.role-request-result { display:flex; align-items:center; gap:7px; margin:0 0 9px; font-size:10px; line-height:1.5; }
+.role-request-result.approved { color:#55d6ad; }
+.role-request-result.rejected { color:#e8a0a5; }
 @media (prefers-reduced-motion: reduce) { .candle-scene-perspective,.scene-candle { animation: none; } }
 .admin-table-panel { overflow: hidden; }
 .admin-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 17px 18px; border-bottom: 1px solid #202d3b; color: #8292a4; font-size: 11px; }
@@ -1621,3 +1625,16 @@ footer > span:last-child {
 .role-request-row small { margin-top: 5px; color: #8b9bad; font-size: 10px; }
 .role-request-row button+button { margin-left: 8px; }
 .admin-reject { padding:7px 9px; border:1px solid #70414b; border-radius:7px; background:#321e27; color:#f1a1a5; font:600 10px 'DM Sans',sans-serif; }
+.admin-queue-metrics { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.admin-toolbar .admin-invite-trigger { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:34px; padding:0 12px; border:1px solid #176071; border-radius:8px; background:#103240; color:#7ce4ed; font:600 10px 'DM Sans',sans-serif; white-space:nowrap; }
+.admin-invite-form { display:grid; grid-template-columns:1fr 1.35fr 1fr auto; align-items:end; gap:12px; padding:16px 18px; border-bottom:1px solid #202d3b; background:linear-gradient(110deg,#10202d,#111b29); }
+.admin-invite-form label { display:grid; gap:6px; color:#8b9bad; font-size:10px; }
+.admin-invite-form input,.admin-invite-form select { width:100%; height:36px; padding:0 10px; border:1px solid #2a3b4e; border-radius:7px; outline:0; background:#0c1622; color:#e3edf4; font:11px 'DM Sans',sans-serif; }
+.admin-invite-form small { grid-column:1/-1; color:#71859a; font-size:10px; }
+.admin-section-title { display:flex!important; align-items:center; gap:9px; width:auto!important; padding:0!important; border:0!important; background:none!important; color:#12bdd5!important; }
+.admin-section-title b { color:#dfe8ef; font:600 12px 'DM Sans',sans-serif; }
+.role-request-actions { display:flex; align-items:center; flex:none; }
+.role-request-row p { margin:8px 0 0; color:#a8b6c3; font-size:11px; }
+.request-role-change { display:inline-block; margin-left:8px; color:#65dcea; }
+.admin-invite-form .admin-save:disabled,.role-request-actions button:disabled,.role-requests-list button:disabled { opacity:.55; cursor:wait; }
+@media (max-width:760px) { .admin-queue-metrics { grid-template-columns:1fr; } .admin-invite-form { grid-template-columns:1fr; } .admin-invite-form small { grid-column:auto; } .role-request-row { align-items:flex-start; flex-direction:column; } }

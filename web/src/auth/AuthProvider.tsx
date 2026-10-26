@@ -32,6 +32,7 @@ type AuthContextValue = {
   resetPassword: (email: string) => Promise<void>;
   completeSetup: (name: string, username: string) => Promise<void>;
   requestRole: (role: string, reason: string) => Promise<void>;
+  refreshProfile: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -52,6 +53,9 @@ function messageOf(error: unknown) {
 
 async function fetchProfile(user: User, forced?: { name: string; username: string }) {
   await user.getIdToken(true);
+  if (forced) {
+    return request<UserProfile>('/auth/sync', { method: 'POST', body: JSON.stringify(forced) });
+  }
   try {
     return await request<UserProfile>('/auth/me');
   } catch (error) {
@@ -86,7 +90,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSetupRequired(false);
     if (!next) return;
     try {
-      const nextProfile = await fetchProfile(next);
+      await reload(next);
+      const refreshedUser = auth.currentUser || next;
+      setUser(refreshedUser);
+      if (!refreshedUser.emailVerified) {
+        setVerificationRequired(true);
+        return;
+      }
+      let pending: { name: string; username: string } | undefined;
+      try { pending = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null') || undefined; } catch { /* Ignore invalid saved setup data. */ }
+      const nextProfile = await fetchProfile(refreshedUser, pending);
       setProfile(nextProfile);
       localStorage.removeItem(PROFILE_KEY);
     } catch (cause) {
@@ -108,6 +121,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = async ({ email, password }: Credentials) => {
     setError(''); setNotice('');
     const result = await signInWithEmailAndPassword(auth, email.trim(), password);
+    setUser(result.user);
+    if (!result.user.emailVerified) {
+      setProfile(null); setSetupRequired(false); setVerificationRequired(true);
+      setNotice('Verify your email to open your QuantDB workspace.');
+      return;
+    }
     const next = await fetchProfile(result.user);
     setUser(result.user); setProfile(next); setVerificationRequired(false); setSetupRequired(false);
     localStorage.removeItem(PROFILE_KEY);
@@ -119,12 +138,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const result = await createUserWithEmailAndPassword(auth, email.trim(), password);
     await updateProfile(result.user, { displayName: name.trim() });
     localStorage.setItem(PROFILE_KEY, JSON.stringify({ name: name.trim(), username: username.trim() }));
+    setUser(result.user); setProfile(null); setSetupRequired(false); setVerificationRequired(true);
     try {
-      const next = await fetchProfile(result.user, { name: name.trim(), username: username.trim() });
-      setUser(result.user); setProfile(next); setVerificationRequired(false); setSetupRequired(false);
-      localStorage.removeItem(PROFILE_KEY);
-    } catch {
-      setUser(result.user); setVerificationRequired(false); setSetupRequired(false);
+      await sendEmailVerification(result.user);
+      setNotice(`A verification link was sent to ${result.user.email}.`);
+    } catch (cause) {
+      setError(`Your account was created, but Firebase could not send the verification email. ${messageOf(cause)} You can retry below.`);
     }
   };
 
@@ -139,8 +158,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await reload(auth.currentUser);
     const refreshed = auth.currentUser;
     setUser(refreshed);
+    if (!refreshed.emailVerified) {
+      setVerificationRequired(true);
+      setNotice('Your email is not verified yet. Open the verification link, then try again.');
+      return;
+    }
     try {
-      const next = await fetchProfile(refreshed);
+      let pending: { name: string; username: string } | undefined;
+      try { pending = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null') || undefined; } catch { /* Ignore invalid saved setup data. */ }
+      const next = await fetchProfile(refreshed, pending);
       setProfile(next); setVerificationRequired(false); setSetupRequired(false); setNotice('Welcome to QuantDB.');
       localStorage.removeItem(PROFILE_KEY);
     } catch (cause) {
@@ -162,6 +188,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await queryClient.invalidateQueries({ queryKey: ['my-role-request'] });
   };
 
+  const refreshProfile = async () => {
+    if (!auth.currentUser) return;
+    const next = await fetchProfile(auth.currentUser);
+    setProfile(next);
+  };
+
   const resetPassword = async (email: string) => {
     await sendPasswordResetEmail(auth, email.trim());
     setNotice(`Password reset link sent to ${email.trim()}.`);
@@ -169,10 +201,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOutUser = async () => {
     setProfile(null); setSetupRequired(false); setVerificationRequired(false); setError('');
     queryClient.clear();
+    localStorage.removeItem(PROFILE_KEY);
     await signOut(auth);
   };
   const clearMessage = () => { setError(''); setNotice(''); };
-  const value = useMemo(() => ({ user, profile, loading, verificationRequired, setupRequired, error, notice, clearMessage, signIn, signUp, signOutUser, resendVerification, refreshVerification, resetPassword, completeSetup, requestRole }), [user, profile, loading, verificationRequired, setupRequired, error, notice]);
+  const value = useMemo(() => ({ user, profile, loading, verificationRequired, setupRequired, error, notice, clearMessage, signIn, signUp, signOutUser, resendVerification, refreshVerification, resetPassword, completeSetup, requestRole, refreshProfile }), [user, profile, loading, verificationRequired, setupRequired, error, notice]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

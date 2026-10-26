@@ -27,8 +27,8 @@ export function AuthScreen() {
     <Brand/>
     <div className="verify-icon"><Mail size={26}/></div>
     <div className="auth-eyebrow">ONE QUICK STEP</div><h1>Verify your email</h1>
-    <p className="auth-subtitle">We sent a secure verification link to <strong>{auth.user?.email}</strong>. Open the message and verify your address to continue. If it is missing, check Spam or Promotions.</p>
-    {auth.error && !auth.error.includes('API 503: Firebase Admin') && <div className="auth-message is-error">{auth.error}</div>}
+    <p className="auth-subtitle">We sent a secure verification link to <strong>{auth.user?.email}</strong>. Open the message and verify your address to continue. Check your inbox first; if it lands in Spam or Promotions, mark it as safe so future messages reach your inbox.</p>
+    {(formError || (auth.error && !auth.error.includes('API 503: Firebase Admin'))) && <div className="auth-message is-error">{formError || auth.error}</div>}
     {auth.error.includes('API 503: Firebase Admin') && <div className="auth-message is-error">Your email is verified, but the API cannot connect your account yet. The project administrator must configure the Firebase Admin service account and database access on the API host.</div>}
     {auth.notice && <div className="auth-message">{auth.notice}</div>}
     <button className="auth-submit" disabled={busy} onClick={() => run(auth.refreshVerification)}><BadgeCheck size={17}/> I’ve verified my email <ArrowRight size={16}/></button>
