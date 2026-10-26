@@ -8,7 +8,10 @@ Strictly paper-trading/simulation: no live broker connections or real money.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from src.trading.orders import (
     Order,
@@ -185,12 +188,13 @@ def get_orders(
     if repo is not None:
         try:
             db_orders = repo.get_orders(user_id=user_id)
-            if db_orders:
+            if db_orders is not None:
                 if security_id is not None:
                     db_orders = [o for o in db_orders if o.get("security_id") == security_id]
                 return db_orders
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("Failed to fetch orders from repository (user_id=%s): %s", user_id, e, exc_info=True)
+            raise
 
     # Fallback to simulated in-memory orders
     results = []
@@ -215,12 +219,13 @@ def get_trades(
     if repo is not None:
         try:
             db_trades = repo.get_trades(security_id=security_id, user_id=user_id)
-            if db_trades:
+            if db_trades is not None:
                 if order_id is not None:
                     db_trades = [t for t in db_trades if t.get("order_id") == order_id]
                 return db_trades
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("Failed to fetch trades from repository (user_id=%s): %s", user_id, e, exc_info=True)
+            raise
 
     results = []
     if user_id is not None:

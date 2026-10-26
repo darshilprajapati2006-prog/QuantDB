@@ -38,19 +38,33 @@ def render_metric_card(
         else:
             delta_class = "quant-card-delta-neutral"
             arrow = "● "
-        delta_html = f'<div class="{delta_class}">{arrow}{change}</div>'
+        delta_html = f'<div class="{delta_class}" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.74rem;">{arrow}{change}</div>'
 
-    badge_html = f'<span class="status-pill status-pill-cyan" style="float: right; font-size: 0.65rem;">{badge}</span>' if badge else ""
-    desc_html = f'<div class="quant-card-desc">{description}</div>' if description else ""
+    badge_html = f'<span class="status-pill status-pill-cyan" style="font-size: 0.60rem; padding: 2px 6px; white-space: nowrap; flex-shrink: 0; line-height: 1;">{badge}</span>' if badge else ""
+    desc_html = f'<div class="quant-card-desc" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.68rem;">{description}</div>' if description else ""
 
-    html = f"""
-    <div class="quant-card">
-        <div class="quant-card-title">{title} {badge_html}</div>
-        <div class="quant-card-value">{value}</div>
-        {delta_html}
-        {desc_html}
-    </div>
-    """
+    # Responsive font sizing based on length to guarantee no awkward line breaks
+    val_str = str(value)
+    val_len = len(val_str)
+    if val_len >= 13:
+        val_font = "1.02rem"
+    elif val_len >= 10:
+        val_font = "1.18rem"
+    elif val_len >= 8:
+        val_font = "1.30rem"
+    else:
+        val_font = "1.42rem"
+
+    import textwrap
+    html = textwrap.dedent(f"""<div class="quant-card">
+<div class="quant-card-title">
+<span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.68rem;">{title}</span>
+{badge_html}
+</div>
+<div class="quant-card-value" style="font-size: {val_font}; white-space: nowrap !important; word-break: keep-all !important; overflow: hidden; text-overflow: ellipsis;">{value}</div>
+{delta_html}
+{desc_html}
+</div>""")
     st.markdown(html, unsafe_allow_html=True)
 
 

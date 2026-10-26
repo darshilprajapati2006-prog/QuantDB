@@ -106,7 +106,7 @@ def _verified_identity(request: Request) -> dict:
                         "uid": u.get("localId"),
                         "email": u.get("email"),
                         "name": u.get("displayName") or (u.get("email", "").split("@")[0] if u.get("email") else ""),
-                        "email_verified": u.get("emailVerified", True),
+                        "email_verified": u.get("emailVerified", False),
                     }
             elif resp.status_code == 400:
                 err_text = resp.text
@@ -124,6 +124,8 @@ def _verified_identity(request: Request) -> dict:
 
     if not claims or not claims.get("email"):
         raise HTTPException(401, "Your session is invalid or expired. Please sign in again.")
+    if not claims.get("email_verified", False):
+        raise HTTPException(403, "Verify your email address before accessing QuantDB.")
 
     email = claims["email"].strip().lower()
     return {"uid": claims.get("uid"), "email": email, "name": claims.get("name") or email.split("@")[0]}
@@ -144,16 +146,20 @@ def _profile_for_identity(identity: dict, allow_missing: bool = False) -> dict |
             clean_uname = re.sub(r"[^A-Za-z0-9_]", "_", raw_uname)[:30]
             if len(clean_uname) < 3:
                 clean_uname = (clean_uname + "user")[:30]
-            default_role = "ADMIN" if email == "darshilprajapati2006@gmail.com" else "USER"
-            new_id = repo.create_user(
-                username=clean_uname,
-                name=identity.get("name") or clean_uname,
-                email=email,
-                password_hash=hash_password("OAuthVerifiedUser!"),
-                role=default_role,
-                status="ACTIVE",
-            )
-            user = repo.get_user(int(new_id)) if new_id else None
+            conn = repo._get_connection()
+            try:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute("SELECT invitation_id, role FROM account_invitations WHERE email = %s AND status = 'PENDING' AND expires_at > CURRENT_TIMESTAMP FOR UPDATE", (email,))
+                invitation = cursor.fetchone()
+                default_role = invitation["role"] if invitation else ("ADMIN" if email == "darshilprajapati2006@gmail.com" else "USER")
+                cursor.execute("INSERT INTO users (username, name, email, password_hash, role, status, is_verified, created_at) VALUES (%s, %s, %s, %s, %s, 'ACTIVE', 1, CURRENT_TIMESTAMP)", (clean_uname, identity.get("name") or clean_uname, email, hash_password("OAuthVerifiedUser!"), default_role))
+                new_id = cursor.lastrowid
+                if invitation:
+                    cursor.execute("UPDATE account_invitations SET status = 'ACCEPTED', accepted_user_id = %s, accepted_at = CURRENT_TIMESTAMP WHERE invitation_id = %s AND status = 'PENDING'", (new_id, invitation["invitation_id"]))
+                conn.commit()
+                user = repo.get_user(int(new_id)) if new_id else None
+            finally:
+                conn.close()
         except Exception as exc:
             logger.warning("Could not auto-provision user profile: %s", exc)
             user = repo.get_user_by_email(identity["email"])
@@ -283,11 +289,26 @@ def sync_account(payload: AccountSyncRequest, request: Request):
         finally:
             repo._close_conn(conn)
     else:
+        from src.database.connection import get_connection
+        conn = get_connection(raise_on_error=True)
         try:
-            new_user_id = repo.create_user(name=payload.name.strip(), email=identity["email"], password_hash="firebase-managed", role="USER", status="ACTIVE", username=payload.username.strip(), is_verified=True)
-            user = repo.get_user(int(new_user_id))
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT invitation_id, role FROM account_invitations WHERE email = %s AND status = 'PENDING' AND expires_at > CURRENT_TIMESTAMP FOR UPDATE", (identity["email"],))
+            invitation = cursor.fetchone()
+            assigned_role = invitation["role"] if invitation else "USER"
+            cursor.execute("INSERT INTO users (username, name, email, password_hash, role, status, is_verified, created_at) VALUES (%s, %s, %s, %s, %s, 'ACTIVE', 1, CURRENT_TIMESTAMP)", (payload.username.strip(), payload.name.strip(), identity["email"], "firebase-managed", assigned_role))
+            user_id = cursor.lastrowid
+            if invitation:
+                cursor.execute("UPDATE account_invitations SET status = 'ACCEPTED', accepted_user_id = %s, accepted_at = CURRENT_TIMESTAMP WHERE invitation_id = %s AND status = 'PENDING'", (user_id, invitation["invitation_id"]))
+            conn.commit()
+            user = repo.get_user(int(user_id))
         except Exception as exc:
+            conn.rollback()
+            if "Duplicate" in str(exc) or "1062" in str(exc):
+                raise HTTPException(409, "That username may already be in use. Please choose another.") from exc
             raise HTTPException(503, "Could not create your QuantDB profile. Please retry when the database is available.") from exc
+        finally:
+            conn.close()
     if not user:
         user = repo.get_user_by_email(identity["email"])
     if not user:
@@ -304,18 +325,20 @@ def current_profile(request: Request):
 
 @app.post("/api/v1/auth/role-request")
 def request_role(payload: RoleRequestPayload, request: Request):
-    """Store the user's role-change request as a pending admin invitation."""
+    """Store a verified user's role-change request for admin review."""
     from src.auth.roles import Role, normalize_role
     from src.database.connection import get_connection
     requested = normalize_role(payload.requested_role)
-    if requested not in Role.ALL_ROLES or requested == Role.USER:
-        raise HTTPException(422, "Choose a role above User.")
+    if requested not in Role.ALL_ROLES or requested in {Role.USER, Role.ADMIN}:
+        raise HTTPException(422, "Choose a supported non-admin role.")
     user = request.state.profile
     if normalize_role(user.get("role")) == requested:
         raise HTTPException(409, "That role is already assigned to your account.")
     conn = get_connection(raise_on_error=True)
     try:
         cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM users WHERE user_id = %s FOR UPDATE", (user["user_id"],))
+        cursor.fetchone()
         cursor.execute("SELECT request_id FROM role_change_requests WHERE user_id = %s AND status = 'PENDING' LIMIT 1", (user["user_id"],))
         existing = cursor.fetchone()
         if existing:
@@ -368,18 +391,93 @@ def review_role_request(request_id: int, payload: RoleReviewPayload, request: Re
     conn = get_connection(raise_on_error=True)
     try:
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT user_id, requested_role FROM role_change_requests WHERE request_id = %s AND status = 'PENDING'", (request_id,))
+        cursor.execute("SELECT user_id, requested_role FROM role_change_requests WHERE request_id = %s AND status = 'PENDING' FOR UPDATE", (request_id,))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(404, "Pending role request not found.")
         if decision == "APPROVED":
             role = normalize_role(row["requested_role"])
-            if role not in Role.ALL_ROLES or role == Role.ADMIN:
+            if role not in Role.ALL_ROLES or role in {Role.ADMIN, Role.USER}:
                 raise HTTPException(422, "This requested role cannot be approved here.")
-            cursor.execute("UPDATE users SET role = %s WHERE user_id = %s", (role, row["user_id"]))
+            cursor.execute("UPDATE users SET role = %s WHERE user_id = %s AND status = 'ACTIVE'", (role, row["user_id"]))
+            if cursor.rowcount != 1:
+                raise HTTPException(409, "This account is no longer active and its role cannot be changed.")
         cursor.execute("UPDATE role_change_requests SET status = %s, reviewed_at = CURRENT_TIMESTAMP, reviewed_by = %s WHERE request_id = %s", (decision, request.state.profile["user_id"], request_id))
         conn.commit()
         return {"request_id": request_id, "status": decision}
+    finally:
+        conn.close()
+
+
+class InvitationRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=150)
+    name: str = Field(default="", max_length=100)
+    role: str = "USER"
+
+
+@app.get("/api/v1/admin/invitations")
+def admin_invitations():
+    from src.database.connection import get_connection
+    conn = get_connection(raise_on_error=True)
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("UPDATE account_invitations SET status = 'EXPIRED' WHERE status = 'PENDING' AND expires_at <= CURRENT_TIMESTAMP")
+        conn.commit()
+        cursor.execute("SELECT invitation_id, email, name, role, status, created_at, expires_at FROM account_invitations WHERE status = 'PENDING' ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        for row in rows:
+            for field in ("created_at", "expires_at"):
+                if hasattr(row.get(field), "isoformat"):
+                    row[field] = row[field].isoformat()
+        return rows
+    finally:
+        conn.close()
+
+
+@app.post("/api/v1/admin/invitations", status_code=201)
+def create_invitation(payload: InvitationRequest, request: Request):
+    from src.auth.roles import Role, normalize_role
+    from src.database.connection import get_connection
+    email = payload.email.strip().lower()
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+        raise HTTPException(422, "Enter a valid email address.")
+    role = normalize_role(payload.role)
+    if role not in Role.ALL_ROLES or role == Role.ADMIN:
+        raise HTTPException(422, "Choose a supported non-admin role.")
+    conn = get_connection(raise_on_error=True)
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT user_id FROM users WHERE email = %s", (email,))
+        if cursor.fetchone():
+            raise HTTPException(409, "An account already exists for this email.")
+        cursor.execute("SELECT invitation_id FROM account_invitations WHERE email = %s AND status = 'PENDING' AND expires_at > CURRENT_TIMESTAMP FOR UPDATE", (email,))
+        if cursor.fetchone():
+            raise HTTPException(409, "A pending invitation already exists for this email.")
+        cursor.execute("INSERT INTO account_invitations (email, name, role, created_by, expires_at) VALUES (%s, %s, %s, %s, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 7 DAY))", (email, payload.name.strip(), role, request.state.profile["user_id"]))
+        conn.commit()
+        return {"invitation_id": cursor.lastrowid, "email": email, "role": role, "status": "PENDING"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        conn.rollback()
+        if "Duplicate" in str(exc) or "1062" in str(exc):
+            raise HTTPException(409, "A pending invitation already exists for this email.") from exc
+        raise
+    finally:
+        conn.close()
+
+
+@app.delete("/api/v1/admin/invitations/{invitation_id}")
+def cancel_invitation(invitation_id: int):
+    from src.database.connection import get_connection
+    conn = get_connection(raise_on_error=True)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE account_invitations SET status = 'REVOKED' WHERE invitation_id = %s AND status = 'PENDING'", (invitation_id,))
+        if cursor.rowcount != 1:
+            raise HTTPException(404, "Pending invitation not found.")
+        conn.commit()
+        return {"invitation_id": invitation_id, "status": "REVOKED"}
     finally:
         conn.close()
 

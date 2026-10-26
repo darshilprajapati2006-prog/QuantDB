@@ -46,13 +46,15 @@ def apply_terminal_theme():
             background: linear-gradient(135deg, rgba(15, 23, 42, 0.85) 0%, rgba(30, 41, 59, 0.5) 100%);
             border: 1px solid rgba(148, 163, 184, 0.12);
             border-radius: 8px;
-            padding: 16px 20px;
-            margin-bottom: 14px;
+            padding: 12px 14px;
+            margin-bottom: 12px;
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
             transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             position: relative;
             overflow: hidden;
+            min-width: 0;
+            box-sizing: border-box;
         }
 
         .quant-card::before {
@@ -78,64 +80,94 @@ def apply_terminal_theme():
         }
 
         .quant-card-title {
-            font-size: 0.72rem;
+            font-size: 0.70rem;
             text-transform: uppercase;
-            letter-spacing: 0.09em;
+            letter-spacing: 0.08em;
             color: #94A3B8;
             font-weight: 600;
-            margin-bottom: 6px;
+            margin-bottom: 5px;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 6px;
+            min-width: 0;
+            overflow: hidden;
+            white-space: nowrap;
         }
 
         .quant-card-value {
-            font-size: 1.65rem;
+            font-size: 1.35rem;
             font-weight: 700;
             color: #F8FAFC;
             font-family: 'JetBrains Mono', monospace;
-            line-height: 1.15;
+            line-height: 1.2;
             letter-spacing: -0.02em;
+            white-space: nowrap !important;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            word-break: keep-all !important;
+            font-variant-numeric: tabular-nums;
         }
 
         .quant-card-delta-pos {
-            font-size: 0.80rem;
+            font-size: 0.76rem;
             color: #10B981;
             font-family: 'JetBrains Mono', monospace;
             font-weight: 600;
-            margin-top: 6px;
+            margin-top: 5px;
             display: flex;
             align-items: center;
             gap: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .quant-card-delta-neg {
-            font-size: 0.80rem;
+            font-size: 0.76rem;
             color: #F43F5E;
             font-family: 'JetBrains Mono', monospace;
             font-weight: 600;
-            margin-top: 6px;
+            margin-top: 5px;
             display: flex;
             align-items: center;
             gap: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .quant-card-delta-neutral {
-            font-size: 0.80rem;
+            font-size: 0.76rem;
             color: #06B6D4;
             font-family: 'JetBrains Mono', monospace;
             font-weight: 600;
-            margin-top: 6px;
+            margin-top: 5px;
             display: flex;
             align-items: center;
             gap: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .quant-card-desc {
-            font-size: 0.72rem;
+            font-size: 0.70rem;
             color: #64748B;
-            margin-top: 6px;
+            margin-top: 5px;
             font-weight: 400;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Prevent column overflow in dense grids */
+        [data-testid="column"] {
+            min-width: 0 !important;
+        }
+        [data-testid="stMetricValue"] {
+            white-space: nowrap !important;
+            word-break: keep-all !important;
         }
 
         /* Status Pills & Badges */

@@ -442,6 +442,7 @@ with admin_tab1:
         return s[:2].upper()
 
     ROLE_CHOICES = ["Viewer", "Quant Trader", "Quant Developer", "Quant Researcher", "System Admin"]
+    INVITE_ROLE_CHOICES = ROLE_CHOICES[:-1]
     ROLE_MAP = {
         Role.USER: "Viewer",
         Role.QUANT_TRADER: "Quant Trader",
@@ -459,9 +460,28 @@ with admin_tab1:
         "System Admin": Role.ADMIN,
     }
 
-    # Fetch users from provider (MySQL in REAL mode)
+    # Fetch users and governance queues from MySQL.
     users_list = get_platform_users()
     total_users_count = len(users_list) if users_list else 0
+    role_request_rows = []
+    pending_invitation_rows = []
+    queue_error = ""
+    queue_conn = None
+    try:
+        queue_conn = Repository()._get_connection()
+        queue_cursor = queue_conn.cursor(dictionary=True)
+        queue_cursor.execute("UPDATE account_invitations SET status = 'EXPIRED' WHERE status = 'PENDING' AND expires_at <= CURRENT_TIMESTAMP")
+        queue_conn.commit()
+        queue_cursor.execute("SELECT r.request_id, r.user_id, u.name, u.email, u.role AS current_role, r.requested_role, r.reason FROM role_change_requests r JOIN users u ON u.user_id = r.user_id WHERE r.status = 'PENDING' ORDER BY r.created_at")
+        role_request_rows = queue_cursor.fetchall()
+        queue_cursor.execute("SELECT invitation_id, email, name, role, expires_at FROM account_invitations WHERE status = 'PENDING' ORDER BY created_at DESC")
+        pending_invitation_rows = queue_cursor.fetchall()
+        queue_cursor.close()
+    except Exception as queue_exc:
+        queue_error = str(queue_exc)
+    finally:
+        if queue_conn is not None:
+            queue_conn.close()
 
     curr_session_email = (st.session_state.get("email") or "").lower().strip()
     curr_session_user = (st.session_state.get("username") or "").lower().strip()
@@ -503,7 +523,7 @@ with admin_tab1:
             st.markdown("""
                 <div style="background: #1a1e2c; border: 1px solid #3b2e5a; border-radius: 10px; padding: 18px 20px; margin: 12px 0 20px 0;">
                     <div style="font-size: 0.88rem; font-weight: 700; color: #c4b5fd; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-                        <span>✉️</span> Invite & Provision New Platform Account
+                        <span>✉️</span> Create a Pending Account Invitation
                     </div>
             """, unsafe_allow_html=True)
             with st.form("urm_invite_user_form"):
@@ -512,36 +532,41 @@ with admin_tab1:
                     inv_name = st.text_input("Full Name", placeholder="e.g. Bharat Pal")
                     inv_email = st.text_input("Institutional Email", placeholder="e.g. user@aid.svnit.ac.in")
                 with inv_c2:
-                    inv_role = st.selectbox("Assigned Role", options=ROLE_CHOICES, index=0)
-                    inv_pwd = st.text_input("Temporary Password", type="password", placeholder="Minimum 6 characters")
+                    inv_role = st.selectbox("Assigned Role", options=INVITE_ROLE_CHOICES, index=0)
                 
-                sub_inv = st.form_submit_button("Provision Account Now", type="primary", use_container_width=True)
+                st.caption("The invitee signs up with this email and receives the assigned role after email verification. Invitation expires in 7 days.")
+                sub_inv = st.form_submit_button("Create Invitation", type="primary", use_container_width=True)
                 if sub_inv:
                     if not inv_email or "@" not in inv_email:
                         st.error("Please provide a valid institutional email address.")
-                    elif not inv_pwd or len(inv_pwd) < 6:
-                        st.error("Temporary password must be at least 6 characters.")
                     else:
+                        invite_conn = None
                         try:
                             clean_em = inv_email.strip().lower()
                             c_name = inv_name.strip() or clean_em.split("@")[0]
                             target_role = REVERSE_ROLE_MAP.get(inv_role, Role.USER)
-                            repo = Repository()
-                            hashed_p = hash_password(inv_pwd)
-                            repo.create_user(
-                                username=clean_em.split("@")[0],
-                                name=c_name,
-                                email=clean_em,
-                                password_hash=hashed_p,
-                                role=target_role,
-                                status="ACTIVE",
-                            )
+                            invite_conn = Repository()._get_connection()
+                            invite_cursor = invite_conn.cursor()
+                            invite_cursor.execute("SELECT user_id FROM users WHERE email = %s", (clean_em,))
+                            if invite_cursor.fetchone():
+                                raise ValueError("An account already exists for this email.")
+                            invite_cursor.execute("SELECT invitation_id FROM account_invitations WHERE email = %s AND status = 'PENDING' AND expires_at > CURRENT_TIMESTAMP", (clean_em,))
+                            if invite_cursor.fetchone():
+                                raise ValueError("A pending invitation already exists for this email.")
+                            invite_cursor.execute("INSERT INTO account_invitations (email, name, role, created_by, expires_at) VALUES (%s, %s, %s, %s, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 7 DAY))", (clean_em, c_name, normalize_role(target_role), st.session_state.get("user_id")))
+                            invite_conn.commit()
+                            invite_cursor.close()
                             clear_analytics_service_cache()
                             st.session_state["show_invite_form"] = False
-                            st.success(f"Successfully provisioned account for {clean_em} with role {inv_role}!")
+                            st.success(f"Invitation created for {clean_em} with role {inv_role}.")
                             st.rerun()
                         except Exception as inv_err:
+                            if invite_conn is not None:
+                                invite_conn.rollback()
                             st.error(f"Failed to provision user: {inv_err}")
+                        finally:
+                            if invite_conn is not None:
+                                invite_conn.close()
             st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
@@ -555,14 +580,80 @@ with admin_tab1:
             </div>
             <div class="urm-stat-col">
                 <span class="urm-stat-txt">Pending Invitations</span>
-                <span class="urm-stat-badge">0</span>
+                <span class="urm-stat-badge">{len(pending_invitation_rows) if not queue_error else '—'}</span>
             </div>
             <div class="urm-stat-col">
                 <span class="urm-stat-txt">Role Change Requests</span>
-                <span class="urm-stat-badge">0</span>
+                <span class="urm-stat-badge">{len(role_request_rows) if not queue_error else '—'}</span>
             </div>
         </div>
     """, unsafe_allow_html=True)
+
+    with st.expander(f"🛡️ Role Change Requests · {len(role_request_rows)} pending", expanded=bool(role_request_rows)):
+        if queue_error:
+            st.error("Governance queues are unavailable. Apply database/13_role_requests.sql and database/14_account_invitations.sql.")
+        elif not role_request_rows:
+            st.info("No role change requests are waiting for review.")
+        else:
+            for role_req in role_request_rows:
+                request_id = role_req["request_id"]
+                request_label = f"{role_req.get('name') or role_req.get('email')} · {ROLE_MAP.get(normalize_role(role_req.get('current_role')), 'Viewer')} → {ROLE_MAP.get(normalize_role(role_req.get('requested_role')), role_req.get('requested_role'))} · {role_req.get('reason') or 'No reason provided'}"
+                req_col, approve_col, reject_col = st.columns([7, 1, 1])
+                req_col.write(request_label)
+                if approve_col.button("Approve", key=f"role_req_approve_{request_id}", disabled=normalize_role(role_req.get("requested_role")) == Role.ADMIN):
+                    review_conn = Repository()._get_connection()
+                    try:
+                        review_cursor = review_conn.cursor()
+                        review_cursor.execute("SELECT user_id, requested_role FROM role_change_requests WHERE request_id = %s AND status = 'PENDING' FOR UPDATE", (request_id,))
+                        locked_request = review_cursor.fetchone()
+                        if not locked_request:
+                            st.warning("This request was already reviewed. Refresh the page.")
+                        else:
+                            review_cursor.execute("UPDATE users SET role = %s WHERE user_id = %s AND status = 'ACTIVE'", (normalize_role(locked_request[1]), locked_request[0]))
+                            if review_cursor.rowcount != 1:
+                                raise ValueError("The account is inactive; its role cannot be changed.")
+                            review_cursor.execute("UPDATE role_change_requests SET status = 'APPROVED', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = %s WHERE request_id = %s AND status = 'PENDING'", (st.session_state.get("user_id"), request_id))
+                            review_conn.commit()
+                            st.toast("Role request approved.", icon="✅")
+                            st.rerun()
+                    except Exception as review_error:
+                        review_conn.rollback()
+                        st.error(f"Could not approve request: {review_error}")
+                    finally:
+                        review_conn.close()
+                if reject_col.button("Reject", key=f"role_req_reject_{request_id}"):
+                    review_conn = Repository()._get_connection()
+                    try:
+                        review_cursor = review_conn.cursor()
+                        review_cursor.execute("UPDATE role_change_requests SET status = 'REJECTED', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = %s WHERE request_id = %s AND status = 'PENDING'", (st.session_state.get("user_id"), request_id))
+                        review_conn.commit()
+                        st.toast("Role request rejected.", icon="↩️")
+                        st.rerun()
+                    except Exception as review_error:
+                        review_conn.rollback()
+                        st.error(f"Could not reject request: {review_error}")
+                    finally:
+                        review_conn.close()
+
+    with st.expander(f"✉️ Pending Invitations · {len(pending_invitation_rows)}", expanded=bool(pending_invitation_rows)):
+        if queue_error:
+            st.error("Invitation queue is unavailable. Apply database/14_account_invitations.sql.")
+        elif not pending_invitation_rows:
+            st.info("No invitations are waiting for sign-up.")
+        else:
+            for invitation in pending_invitation_rows:
+                inv_col, revoke_col = st.columns([8, 1])
+                inv_col.write(f"{invitation.get('name') or invitation['email']} · {invitation['email']} · {ROLE_MAP.get(normalize_role(invitation['role']), invitation['role'])} · expires {invitation['expires_at']}")
+                if revoke_col.button("Revoke", key=f"invite_revoke_{invitation['invitation_id']}"):
+                    revoke_conn = Repository()._get_connection()
+                    try:
+                        revoke_cursor = revoke_conn.cursor()
+                        revoke_cursor.execute("UPDATE account_invitations SET status = 'REVOKED' WHERE invitation_id = %s AND status = 'PENDING'", (invitation["invitation_id"],))
+                        revoke_conn.commit()
+                        st.toast("Invitation revoked.", icon="↩️")
+                        st.rerun()
+                    finally:
+                        revoke_conn.close()
 
     # ── Users Table Header ───────────────────────────────────────────────────
     st.markdown("""

@@ -147,6 +147,10 @@ def get_current_user() -> Optional[Dict[str, Any]]:
     }
 
 
+def _queue_login_session_persistence() -> None:
+    st.session_state["_quantdb_persist_session_cookie"] = True
+
+
 def get_current_role() -> str:
     """Returns the normalized role of the authenticated session, defaulting to USER."""
     if not is_authenticated():
@@ -282,6 +286,7 @@ def login(identifier: str, password: str, selected_role: Optional[str] = None) -
 
             threading.Thread(target=_async_mail_fb, args=(user_info["email"], user_info.get("name", "")), daemon=True).start()
 
+            _queue_login_session_persistence()
             return True, "Authentication successful."
         except firebase_auth.FirebaseAuthError as e:
             return False, str(e)
@@ -316,6 +321,7 @@ def login(identifier: str, password: str, selected_role: Optional[str] = None) -
 
         threading.Thread(target=_async_mail_sql, args=(user_info["email"], user_info.get("name", "")), daemon=True).start()
 
+        _queue_login_session_persistence()
         return True, "Authentication successful."
 
     except UnverifiedEmailError as e:
@@ -457,6 +463,7 @@ def signup(
                 st.session_state["role_display"] = get_role_display_name(existing.get("role", chosen_role))
                 st.session_state["auth_screen"] = "signin"
                 st.session_state["pending_verification"] = None
+                _queue_login_session_persistence()
                 return True, f"Welcome to QuantDB, {existing.get('name', name)}! Signed in successfully."
     except Exception as e:
         logger.warning(f"Existing user verification check in signup: {e}")
@@ -559,6 +566,11 @@ def resend_otp_code(user_id_or_identifier: Any) -> Tuple[bool, str]:
 def logout() -> None:
     """Logs out the current session and clears all authentication state."""
     init_session_state()
+    try:
+        from dashboard.services.session_cookie import clear_login_session
+        clear_login_session()
+    except Exception as exc:
+        logger.warning("Could not clear persistent browser login: %s", exc)
     st.session_state["authenticated"] = False
     st.session_state["user_id"] = None
     st.session_state["username"] = None
@@ -570,6 +582,12 @@ def logout() -> None:
     st.session_state["pending_verification"] = None
     st.session_state["account_created_msg"] = None
     st.session_state["prefill_email"] = ""
+    st.session_state["_quantdb_skip_cookie_restore_once"] = True
+    try:
+        from dashboard.services.trading_service import invalidate_trading_cache
+        invalidate_trading_cache()
+    except Exception:
+        pass
 
 
 def check_page_access(page_name: str) -> bool:
@@ -1042,6 +1060,18 @@ def require_auth(current_page: str = "Overview") -> bool:
     If unauthorized, renders restricted alert and stops execution.
     Returns True only if authentication and authorization pass.
     """
+    if is_authenticated() and st.session_state.pop("_quantdb_persist_session_cookie", False):
+        try:
+            from dashboard.services.session_cookie import persist_login_session
+            persist_login_session()
+        except Exception as exc:
+            logger.warning("Could not persist browser login session: %s", exc)
+    if not is_authenticated() and not st.session_state.pop("_quantdb_skip_cookie_restore_once", False):
+        try:
+            from dashboard.services.session_cookie import restore_login_session
+            restore_login_session()
+        except Exception as exc:
+            logger.warning("Could not restore browser login session: %s", exc)
     if not is_authenticated():
         render_login_screen()
         st.stop()

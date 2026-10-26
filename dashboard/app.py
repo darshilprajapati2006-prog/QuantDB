@@ -240,19 +240,24 @@ st.markdown("""
 
 mkt_summary = get_market_overview()
 if not mkt_summary.empty:
-    mkt_cols = st.columns(len(mkt_summary))
-    for i, (_, row) in enumerate(mkt_summary.iterrows()):
-        with mkt_cols[i]:
-            is_up = row["change"] >= 0
-            change_str = f"{row['change']:+.2f} ({row['change_pct']:+.2f}%)"
-            render_metric_card(
-                title=f"{row['symbol']}",
-                value=f"${row['last_price']:.2f}",
-                change=change_str,
-                is_positive=is_up,
-                description=f"Vol: {row['volume']:,}",
-                badge=f"Spread ${row['spread']:.2f}"
-            )
+    cols_per_row = 5
+    for row_start in range(0, len(mkt_summary), cols_per_row):
+        chunk = mkt_summary.iloc[row_start : row_start + cols_per_row]
+        mkt_cols = st.columns(len(chunk))
+        for i, (_, row) in enumerate(chunk.iterrows()):
+            with mkt_cols[i]:
+                is_up = row["change"] >= 0
+                change_str = f"{row['change']:+.2f} ({row['change_pct']:+.2f}%)"
+                vol_num = row['volume']
+                vol_display = f"Vol: {vol_num/1e6:.1f}M" if vol_num >= 1e6 else f"Vol: {vol_num:,}"
+                render_metric_card(
+                    title=f"{row['symbol']}",
+                    value=f"${row['last_price']:.2f}",
+                    change=change_str,
+                    is_positive=is_up,
+                    description=vol_display,
+                    badge=f"Spread ${row['spread']:.2f}"
+                )
 
 st.markdown("<div class='quant-divider'></div>", unsafe_allow_html=True)
 

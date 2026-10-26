@@ -120,6 +120,9 @@ CREATE TABLE IF NOT EXISTS email_otps (
 );
 ```
 
+### Migrations `13_role_requests.sql` and `14_account_invitations.sql`
+Role changes are stored in `role_change_requests` and only take effect when an administrator approves the pending row. Invitations are stored in `account_invitations`; a matching verified email accepts the invitation during profile setup, applying its assigned role in the same database transaction. Pending invitations expire after seven days and administrators can revoke them.
+
 ---
 
 ## 6. SMTP & Environment Configuration

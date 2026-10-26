@@ -396,7 +396,6 @@ GET_ORDERS_BY_USER = """
 SELECT
     o.order_id,
     o.user_id,
-    o.portfolio_id,
     o.security_id,
     s.symbol,
     o.order_type,
@@ -416,7 +415,6 @@ GET_ORDERS_BY_SECURITY = """
 SELECT
     o.order_id,
     o.user_id,
-    o.portfolio_id,
     o.security_id,
     s.symbol,
     o.order_type,
@@ -436,7 +434,6 @@ GET_ALL_ORDERS = """
 SELECT
     o.order_id,
     o.user_id,
-    o.portfolio_id,
     o.security_id,
     s.symbol,
     o.order_type,
@@ -509,7 +506,6 @@ GET_TRADES_BY_SECURITY = """
 SELECT
     t.trade_id,
     t.order_id,
-    o.portfolio_id,
     t.security_id,
     s.symbol,
     t.trade_side,
@@ -545,7 +541,6 @@ GET_TRADES_BY_USER = """
 SELECT
     t.trade_id,
     t.order_id,
-    o.portfolio_id,
     t.security_id,
     s.symbol,
     t.trade_side,
@@ -1234,7 +1229,7 @@ def create_user(
 
         cursor.execute(
             CREATE_USER,
-            (uname, resolved_name, resolved_email, resolved_hash, resolved_role, resolved_status, bool(kwargs.get("is_verified", False)), now),
+            (name, resolved_name, resolved_email, resolved_hash, resolved_role, resolved_status, bool(kwargs.get("is_verified", False)), now),
         )
         conn.commit()
         return cursor.lastrowid

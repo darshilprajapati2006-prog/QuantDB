@@ -96,6 +96,8 @@ All database scripts are located under `database/` and must be executed in exact
 10_triggers.sql           → Database triggers for automated cash updates, trade matching, and price validation.
 11_transactions.sql       → ACID transaction procedures with row locking (FOR UPDATE) and SAVEPOINT rollbacks.
 12_authentication.sql     → Authentication, PBKDF2 credentials, and Role-Based Access Control (RBAC) migration.
+13_role_requests.sql      → Persistent, admin-reviewed account role changes.
+14_account_invitations.sql→ Pending invitations, acceptance, revocation, and seven-day expiry.
 ```
 
 ---
@@ -144,6 +146,10 @@ mysql -u root -p < database/08_procedures.sql
 mysql -u root -p < database/09_functions.sql
 mysql -u root -p < database/10_triggers.sql
 mysql -u root -p < database/11_transactions.sql
+mysql -u root -p < database/12_authentication.sql
+mysql -u root -p < database/13_signup_otp_verification.sql
+mysql -u root -p < database/13_role_requests.sql
+mysql -u root -p < database/14_account_invitations.sql
 ```
 
 ### 4. Configure Environment Variables
@@ -163,7 +169,11 @@ DB_NAME=QuantDB
 DB_USER=root
 DB_PASSWORD=your_password
 DATA_MODE=real
+QUANTDB_SESSION_SECRET=<stable-random-secret>
+QUANTDB_COOKIE_SECURE=true
 ```
+
+The session secret signs the expiring browser login cookie used to restore Streamlit authentication after a page refresh. Use a stable random value (for example, `openssl rand -hex 32`) and enable secure cookies on HTTPS deployments.
 
 ---
 
